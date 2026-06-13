@@ -48,14 +48,14 @@ MAX_SIGNALS_PER_HOUR = int(os.getenv("MAX_SIGNALS_PER_HOUR", 10))
 QUOTE_CURRENCY       = "USDT"
 
 # ── Signal quality thresholds ──────────────────────────────────────────────────
-MIN_CONFIDENCE       = float(os.getenv("MIN_CONFIDENCE", 70))
-MIN_RR_RATIO         = float(os.getenv("MIN_RR_RATIO", 2.0))
-MIN_INDICATORS_AGREE = 3      # minimum number of indicators that must agree
+MIN_CONFIDENCE       = float(os.getenv("MIN_CONFIDENCE", 75))
+MIN_RR_RATIO         = float(os.getenv("MIN_RR_RATIO", 2.5))
+MIN_INDICATORS_AGREE = 4      # minimum number of indicators that must agree
 
 # ── Indicator parameters ───────────────────────────────────────────────────────
 RSI_PERIOD           = 14
-RSI_OVERSOLD         = 35
-RSI_OVERBOUGHT       = 65
+RSI_OVERSOLD         = 30
+RSI_OVERBOUGHT       = 70
 MACD_FAST            = 12
 MACD_SLOW            = 26
 MACD_SIGNAL          = 9
@@ -68,12 +68,19 @@ EMA_TREND            = 200
 ADX_PERIOD           = 14
 ADX_TREND_MIN        = 20    # ADX > this = trending market
 ATR_PERIOD           = 14
-ATR_SL_MULTIPLIER    = 1.5   # stop loss = entry ± (ATR × multiplier)
+ATR_SL_MULTIPLIER    = 1.5   # stop loss = entry ± (ATR × multiplier) — scalp
+ATR_SL_MULTIPLIER_SWING = 2.5  # wider SL for swing trades (4h noise)
+ADX_SWING_MIN        = 25     # stronger trend required for swing signals
 STOCH_K              = 14
 STOCH_D              = 3
 STOCH_OVERSOLD       = 25
 STOCH_OVERBOUGHT     = 75
 OBV_MA_PERIOD        = 20
+
+# ── Signal filters ─────────────────────────────────────────────────────────────
+COUNTER_TREND_BLOCK  = True   # block signals opposing EMA200 macro trend
+SWING_HTF_REQUIRED   = True   # mandate higher-TF confirmation for swing signals
+MIN_VOLUME_USDT_SWING = float(os.getenv("MIN_VOLUME_USDT_SWING", 5_000_000))
 
 # ── Timeframes ─────────────────────────────────────────────────────────────────
 SCALPING_TIMEFRAMES  = ["1m", "5m", "15m"]

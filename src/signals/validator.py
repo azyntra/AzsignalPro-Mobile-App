@@ -1,11 +1,16 @@
 """
 validator.py — Validates a signal, computes entry zone, TP levels, and stop loss.
+v2.0: Separate SL multiplier for swing vs scalp, counter-trend blocking,
+      style-aware validation.
+
 Uses ATR for dynamic stop placement. Enforces minimum R:R ratio.
 """
 from typing import Optional
 from config.settings import (
-    ATR_SL_MULTIPLIER, MIN_RR_RATIO, MIN_CONFIDENCE, MIN_INDICATORS_AGREE,
-    TP1_R, TP2_R, TP3_R
+    ATR_SL_MULTIPLIER, ATR_SL_MULTIPLIER_SWING,
+    MIN_RR_RATIO, MIN_CONFIDENCE, MIN_INDICATORS_AGREE,
+    TP1_R, TP2_R, TP3_R,
+    COUNTER_TREND_BLOCK,
 )
 from config.logger import get_logger
 
@@ -15,13 +20,15 @@ logger = get_logger(__name__)
 def validate_and_build(
     score_result: dict,
     market_type: str = "spot",
+    style: str = "scalp",
 ) -> Optional[dict]:
     """
     Takes the output of score_scalp / score_swing and:
     1. Checks confidence threshold
     2. Checks minimum indicator agreement
-    3. Computes entry, TP1/TP2/TP3, stop loss
-    4. Checks minimum R:R ratio
+    3. Applies counter-trend guard (EMA200)
+    4. Computes entry, TP1/TP2/TP3, stop loss (style-aware SL multiplier)
+    5. Checks minimum R:R ratio
     Returns a complete signal dict or None if it fails validation.
     """
     direction  = score_result.get("direction")
@@ -44,13 +51,33 @@ def validate_and_build(
     if not price or price <= 0:
         return None
 
-    # ── Stop loss using ATR ───────────────────────────────────────────────────
-    sl_distance = (atr * ATR_SL_MULTIPLIER) if atr else (price * 0.02)
+    # ── Counter-trend block ───────────────────────────────────────────────────
+    # Reject signals that go against the EMA200 macro trend
+    if COUNTER_TREND_BLOCK and ind.get("above_200") is not None:
+        if direction == "LONG" and ind["above_200"] is False:
+            logger.debug(f"Signal rejected: LONG below EMA200 (counter-trend)")
+            return None
+        if direction == "SHORT" and ind["above_200"] is True:
+            logger.debug(f"Signal rejected: SHORT above EMA200 (counter-trend)")
+            return None
+
+    # ── Stop loss using ATR (style-aware multiplier) ──────────────────────────
+    if style == "swing":
+        sl_mult = ATR_SL_MULTIPLIER_SWING
+    else:
+        sl_mult = ATR_SL_MULTIPLIER
+
+    sl_distance = (atr * sl_mult) if atr else (price * 0.02)
+
+    # Entry zone width: slightly wider for swing trades
+    if style == "swing":
+        entry_spread = 0.002  # ±0.2%
+    else:
+        entry_spread = 0.001  # ±0.1%
 
     if direction == "LONG":
-        # Entry zone: slightly below current price (bid-area)
-        entry_low  = round(price * 0.999, _decimals(price))
-        entry_high = round(price * 1.001, _decimals(price))
+        entry_low  = round(price * (1 - entry_spread), _decimals(price))
+        entry_high = round(price * (1 + entry_spread), _decimals(price))
         stop_loss  = round(price - sl_distance, _decimals(price))
         tp1        = round(price + sl_distance * TP1_R, _decimals(price))
         tp2        = round(price + sl_distance * TP2_R, _decimals(price))
@@ -60,8 +87,8 @@ def validate_and_build(
         tp2_pct    = (tp2 - price) / price * 100
         tp3_pct    = (tp3 - price) / price * 100
     else:  # SHORT
-        entry_low  = round(price * 0.999, _decimals(price))
-        entry_high = round(price * 1.001, _decimals(price))
+        entry_low  = round(price * (1 - entry_spread), _decimals(price))
+        entry_high = round(price * (1 + entry_spread), _decimals(price))
         stop_loss  = round(price + sl_distance, _decimals(price))
         tp1        = round(price - sl_distance * TP1_R, _decimals(price))
         tp2        = round(price - sl_distance * TP2_R, _decimals(price))

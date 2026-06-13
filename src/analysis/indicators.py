@@ -132,12 +132,46 @@ def compute_indicators(df: pd.DataFrame) -> Optional[dict]:
         candle_range = float(high.iloc[-1] - low.iloc[-1])
         body_pct     = body / candle_range if candle_range else 0
 
+        # ── RSI divergence detection (lookback 14 candles) ──────────────
+        rsi_series = tam.RSIIndicator(close, window=RSI_PERIOD).rsi()
+        rsi_bull_div = False
+        rsi_bear_div = False
+        div_lookback = min(14, len(df) - 2)
+        if div_lookback >= 5:
+            try:
+                recent_close = close.iloc[-div_lookback:]
+                recent_rsi   = rsi_series.iloc[-div_lookback:]
+                # Bullish divergence: price lower low, RSI higher low
+                price_min_idx = recent_close.idxmin()
+                price_min_pos = recent_close.index.get_loc(price_min_idx)
+                if price_min_pos > 0:
+                    prev_low_price = recent_close.iloc[:price_min_pos].min()
+                    if float(recent_close.iloc[price_min_pos]) < prev_low_price:
+                        rsi_at_new_low  = float(recent_rsi.iloc[price_min_pos])
+                        rsi_at_prev_low = float(recent_rsi.iloc[:price_min_pos].min())
+                        if rsi_at_new_low > rsi_at_prev_low and rsi_at_new_low < 40:
+                            rsi_bull_div = True
+                # Bearish divergence: price higher high, RSI lower high
+                price_max_idx = recent_close.idxmax()
+                price_max_pos = recent_close.index.get_loc(price_max_idx)
+                if price_max_pos > 0:
+                    prev_high_price = recent_close.iloc[:price_max_pos].max()
+                    if float(recent_close.iloc[price_max_pos]) > prev_high_price:
+                        rsi_at_new_high  = float(recent_rsi.iloc[price_max_pos])
+                        rsi_at_prev_high = float(recent_rsi.iloc[:price_max_pos].max())
+                        if rsi_at_new_high < rsi_at_prev_high and rsi_at_new_high > 60:
+                            rsi_bear_div = True
+            except Exception:
+                pass  # divergence detection is best-effort
+
         return {
             "price":          price,
             "prev_close":     prev_close,
             "change_pct":     (price - prev_close) / prev_close * 100,
 
             "rsi":            rsi,
+            "rsi_bull_div":   rsi_bull_div,
+            "rsi_bear_div":   rsi_bear_div,
 
             "macd_line":      macd_line,
             "macd_signal":    macd_signal,

@@ -1,27 +1,40 @@
 """
 swing.py — Swing trading strategy for 1h / 4h / 1d timeframes.
-Uses trend-following signals: EMA alignment, ADX trend strength, MACD,
-RSI momentum, OBV confirmation, and higher-timeframe structure.
+v2.0: Hardened signal quality with trend guards, mandatory HTF
+      confirmation, divergence scoring, and stricter partial weights.
+
+Changes from v1:
+  - Trend guard: blocks counter-trend signals when EMA200 exists
+  - Higher-TF confirmation is MANDATORY (configurable)
+  - RSI used for momentum confirmation, NOT reversal signals
+  - RSI divergence detection carries significant weight
+  - Partial scores drastically reduced (MACD hist alone = 30% max)
+  - ADX minimum raised to 25 for swing signals
+  - HTF disagreement applies a penalty (not just zero bonus)
 """
 from typing import Optional
-from config.settings import RSI_OVERSOLD, RSI_OVERBOUGHT, ADX_TREND_MIN
+from config.settings import (
+    RSI_OVERSOLD, RSI_OVERBOUGHT, ADX_TREND_MIN,
+    COUNTER_TREND_BLOCK, SWING_HTF_REQUIRED, ADX_SWING_MIN,
+)
 from config.logger import get_logger
 
 logger = get_logger(__name__)
 
 SWING_WEIGHTS = {
-    "ema_trend":  20,
-    "adx":        20,
-    "macd":       20,
-    "rsi":        15,
-    "obv":        15,
-    "ema200":     10,
+    "ema_trend":   20,
+    "adx":         18,
+    "macd":        18,
+    "rsi":         12,
+    "divergence":  12,   # NEW — RSI divergence (high quality)
+    "obv":         10,
+    "ema200":      10,
 }
 
 
 def score_swing(
-    ind_base: Optional[dict],   # primary TF (e.g. 1h or 4h)
-    ind_high: Optional[dict],   # higher TF confirmation (e.g. 4h or 1d)
+    ind_base: Optional[dict],   # primary TF (e.g. 4h)
+    ind_high: Optional[dict],   # higher TF confirmation (e.g. 1d)
 ) -> dict:
     """
     Score a swing trading opportunity using multi-timeframe confluence.
@@ -37,6 +50,15 @@ def score_swing(
 
     ind = ind_base
 
+    # ━━ HARD TREND GUARD ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    # Block counter-trend signals when EMA200 macro direction is clear.
+    # This is the #1 cause of losses — shorting uptrends, longing downtrends.
+    if COUNTER_TREND_BLOCK and ind.get("above_200") is not None:
+        trend_is_bull = ind["above_200"]  # True = price above EMA200
+        # We'll use this below to kill the losing direction after scoring
+    else:
+        trend_is_bull = None  # unknown — allow both directions
+
     # ── EMA trend alignment (weight 20) ───────────────────────────────────────
     if ind.get("ema_bull"):
         long_score += SWING_WEIGHTS["ema_trend"]
@@ -44,34 +66,35 @@ def score_swing(
     elif ind.get("ema_bear"):
         short_score += SWING_WEIGHTS["ema_trend"]
         short_reasons.append("EMA 9<21<50 bear alignment")
-    # partial: price above/below EMA50
+    # partial: price above/below EMA50 — REDUCED to 30% (was 50%)
     elif ind.get("price") and ind.get("ema50"):
         if ind["price"] > ind["ema50"]:
-            long_score  += SWING_WEIGHTS["ema_trend"] * 0.5
+            long_score  += SWING_WEIGHTS["ema_trend"] * 0.3
         else:
-            short_score += SWING_WEIGHTS["ema_trend"] * 0.5
+            short_score += SWING_WEIGHTS["ema_trend"] * 0.3
 
-    # ── ADX trend strength (weight 20) ────────────────────────────────────────
+    # ── ADX trend strength (weight 18, minimum 25 for swing) ──────────────────
     adx = ind.get("adx")
-    if adx and adx > ADX_TREND_MIN:
+    if adx and adx > ADX_SWING_MIN:
         if ind.get("adx_bull"):
             long_score += SWING_WEIGHTS["adx"]
             long_reasons.append(f"ADX trending bull ({adx:.0f})")
         elif ind.get("adx_bear"):
             short_score += SWING_WEIGHTS["adx"]
             short_reasons.append(f"ADX trending bear ({adx:.0f})")
+        # Trending but no clear DI direction — very small partial
         else:
-            # Trending but no DI direction — partial weight
-            long_score  += SWING_WEIGHTS["adx"] * 0.3
-            short_score += SWING_WEIGHTS["adx"] * 0.3
-    elif adx:
-        # Ranging market — moderate discount
+            long_score  += SWING_WEIGHTS["adx"] * 0.15
+            short_score += SWING_WEIGHTS["adx"] * 0.15
+    elif adx and adx > ADX_TREND_MIN:
+        # Weakly trending (20-25) — small partial only if EMAs agree
         if ind.get("ema_bull"):
-            long_score  += SWING_WEIGHTS["adx"] * 0.4
+            long_score  += SWING_WEIGHTS["adx"] * 0.25
         elif ind.get("ema_bear"):
-            short_score += SWING_WEIGHTS["adx"] * 0.4
+            short_score += SWING_WEIGHTS["adx"] * 0.25
+    # ADX < 20 → ranging market, no ADX score awarded at all
 
-    # ── MACD (weight 20) ──────────────────────────────────────────────────────
+    # ── MACD (weight 18) ──────────────────────────────────────────────────────
     if ind.get("macd_cross_bull"):
         long_score += SWING_WEIGHTS["macd"]
         long_reasons.append("MACD bullish crossover")
@@ -80,33 +103,41 @@ def score_swing(
         short_reasons.append("MACD bearish crossover")
     elif ind.get("macd_hist") is not None:
         h = ind["macd_hist"]
+        # Histogram without crossover — MUCH reduced (was 60-80%, now 30% max)
         if h > 0:
-            long_score  += SWING_WEIGHTS["macd"] * 0.6
-            if ind.get("macd_line", 0) > 0:
-                long_score  += SWING_WEIGHTS["macd"] * 0.2
-                long_reasons.append("MACD above zero bullish")
+            long_score  += SWING_WEIGHTS["macd"] * 0.3
         else:
-            short_score += SWING_WEIGHTS["macd"] * 0.6
-            if ind.get("macd_line", 0) < 0:
-                short_score += SWING_WEIGHTS["macd"] * 0.2
-                short_reasons.append("MACD below zero bearish")
+            short_score += SWING_WEIGHTS["macd"] * 0.3
 
-    # ── RSI momentum (weight 15) ──────────────────────────────────────────────
+    # ── RSI momentum (weight 12) ──────────────────────────────────────────────
+    # For swing: RSI CONFIRMS momentum, it does NOT suggest reversals.
+    # Oversold/overbought in swing = the trend is strong, not a reversal signal.
     rsi = ind.get("rsi")
     if rsi is not None:
-        if rsi < RSI_OVERSOLD:
+        if 50 < rsi < RSI_OVERBOUGHT and long_score > short_score:
+            # RSI in bullish momentum zone — confirms long
             long_score += SWING_WEIGHTS["rsi"]
-            long_reasons.append(f"RSI oversold ({rsi:.1f}) — potential reversal")
-        elif rsi > RSI_OVERBOUGHT:
+            long_reasons.append(f"RSI bullish momentum ({rsi:.1f})")
+        elif 30 < rsi < 50 and short_score > long_score:
+            # RSI in bearish momentum zone — confirms short
             short_score += SWING_WEIGHTS["rsi"]
-            short_reasons.append(f"RSI overbought ({rsi:.1f}) — potential reversal")
-        elif 45 < rsi < 60 and long_score > short_score:
-            long_score += SWING_WEIGHTS["rsi"] * 0.5
-            long_reasons.append(f"RSI bullish zone ({rsi:.1f})")
-        elif 40 < rsi < 55 and short_score > long_score:
+            short_reasons.append(f"RSI bearish momentum ({rsi:.1f})")
+        elif rsi > RSI_OVERBOUGHT:
+            # Overbought — mild short bias but NOT full weight
             short_score += SWING_WEIGHTS["rsi"] * 0.5
+        elif rsi < RSI_OVERSOLD:
+            # Oversold — mild long bias but NOT full weight
+            long_score  += SWING_WEIGHTS["rsi"] * 0.5
 
-    # ── OBV volume confirmation (weight 15) ───────────────────────────────────
+    # ── RSI divergence (weight 12) — highest quality reversal signal ──────────
+    if ind.get("rsi_bull_div"):
+        long_score += SWING_WEIGHTS["divergence"]
+        long_reasons.append("RSI bullish divergence detected")
+    if ind.get("rsi_bear_div"):
+        short_score += SWING_WEIGHTS["divergence"]
+        short_reasons.append("RSI bearish divergence detected")
+
+    # ── OBV volume confirmation (weight 10) ───────────────────────────────────
     if ind.get("obv_rising") is True:
         long_score += SWING_WEIGHTS["obv"]
         long_reasons.append("OBV rising — accumulation")
@@ -122,28 +153,54 @@ def score_swing(
         short_score += SWING_WEIGHTS["ema200"]
         short_reasons.append("Price below EMA200 macro bear")
 
-    # ── Higher TF confirmation (bonus up to +15) ──────────────────────────────
+    # ━━ TREND GUARD APPLICATION ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    # Kill counter-trend direction entirely
+    if trend_is_bull is True:
+        # Macro uptrend — kill short signals
+        short_score = 0
+        short_reasons = []
+    elif trend_is_bull is False:
+        # Macro downtrend — kill long signals
+        long_score = 0
+        long_reasons = []
+
+    # ── Higher TF confirmation (mandatory when configured) ────────────────────
+    htf_confirms_long  = False
+    htf_confirms_short = False
+
     if ind_high:
         h = ind_high
-        bonus = 0
-        if h.get("ema_bull"):
-            bonus += 8
-        if (h.get("adx") or 0) > ADX_TREND_MIN and h.get("adx_bull"):
-            bonus += 7
-        if bonus > 0 and long_score > short_score:
-            long_score = min(long_score + bonus, 100)
-            if bonus >= 8:
-                long_reasons.append("Higher TF confirms trend")
+        # Check if higher TF aligns with signal direction
+        if h.get("ema_bull") or (h.get("adx_bull") and (h.get("adx") or 0) > ADX_TREND_MIN):
+            htf_confirms_long = True
+        if h.get("ema_bear") or (h.get("adx_bear") and (h.get("adx") or 0) > ADX_TREND_MIN):
+            htf_confirms_short = True
 
-        bonus = 0
-        if h.get("ema_bear"):
-            bonus += 8
-        if (h.get("adx") or 0) > ADX_TREND_MIN and h.get("adx_bear"):
-            bonus += 7
-        if bonus > 0 and short_score > long_score:
-            short_score = min(short_score + bonus, 100)
-            if bonus >= 8:
-                short_reasons.append("Higher TF confirms trend")
+        # Apply bonus for confirmation
+        if htf_confirms_long and long_score > short_score:
+            long_score = min(long_score + 12, 100)
+            long_reasons.append("Higher TF confirms bull trend")
+        if htf_confirms_short and short_score > long_score:
+            short_score = min(short_score + 12, 100)
+            short_reasons.append("Higher TF confirms bear trend")
+
+        # PENALTY: if HTF actively disagrees, cut score by 40%
+        if long_score > short_score and htf_confirms_short and not htf_confirms_long:
+            long_score *= 0.6
+            long_reasons.append("⚠ Higher TF disagrees — score penalized")
+        if short_score > long_score and htf_confirms_long and not htf_confirms_short:
+            short_score *= 0.6
+            short_reasons.append("⚠ Higher TF disagrees — score penalized")
+
+    # ── MANDATORY HTF CHECK ───────────────────────────────────────────────────
+    # If configured, kill signals that have no higher-TF confirmation at all
+    if SWING_HTF_REQUIRED and ind_high:
+        if long_score > short_score and not htf_confirms_long:
+            logger.debug("Swing long rejected: no higher-TF confirmation")
+            return _empty()
+        if short_score > long_score and not htf_confirms_short:
+            logger.debug("Swing short rejected: no higher-TF confirmation")
+            return _empty()
 
     # ── Determine direction ───────────────────────────────────────────────────
     direction  = None

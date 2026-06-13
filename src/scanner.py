@@ -60,7 +60,7 @@ async def _process_scalp(exchange: str, symbol: str, market_type: str):
     if not result["direction"]:
         return
 
-    signal = validate_and_build(result, market_type)
+    signal = validate_and_build(result, market_type, style="scalp")
     if not signal:
         return
 
@@ -94,7 +94,7 @@ async def _process_swing(exchange: str, symbol: str, market_type: str):
     if not result["direction"]:
         return
 
-    signal = validate_and_build(result, market_type)
+    signal = validate_and_build(result, market_type, style="swing")
     if not signal:
         return
 
