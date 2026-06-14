@@ -1,46 +1,51 @@
 """
 scalping.py — Scalping strategy for 1m / 5m / 15m timeframes.
-v2.0: Tighter partial scores, candle quality filter, higher-TF
-      penalty for disagreement, divergence support.
-
-Changes from v1:
-  - MACD histogram without crossover: 30% weight (was 50%)
-  - Partial EMA signal: 30% weight (was 40%)
-  - Added candle body filter: skip doji/indecision candles
-  - Higher-TF disagreement applies a PENALTY (cuts score)
-  - RSI divergence support for high-quality entries
+v3.0: Market regime filter, S/R proximity, VWAP confirmation,
+      plus all v2 hardening (candle filter, HTF penalty, divergence).
 """
 from typing import Optional
-from config.settings import RSI_OVERSOLD, RSI_OVERBOUGHT, STOCH_OVERSOLD, STOCH_OVERBOUGHT
+from config.settings import (
+    RSI_OVERSOLD, RSI_OVERBOUGHT, STOCH_OVERSOLD, STOCH_OVERBOUGHT,
+    SR_BLOCK_PROXIMITY_PCT, SR_PENALTY_PROXIMITY_PCT,
+)
+from src.analysis.indicators import _sr_risk
 from config.logger import get_logger
 
 logger = get_logger(__name__)
 
-# Indicator weights for scalp voting  (must sum ≈ 100 per direction)
 SCALP_WEIGHTS = {
-    "rsi":        18,
-    "macd":       18,
-    "ema":        15,
-    "bb":         15,
-    "stoch":      12,
-    "volume":     12,
-    "divergence": 10,   # NEW — RSI divergence
+    "rsi":        16,
+    "macd":       16,
+    "ema":        14,
+    "bb":         14,
+    "stoch":      10,
+    "volume":     10,
+    "divergence":  8,
+    "vwap":        6,
+    "structure":   6,
 }
 
 
 def score_scalp(
-    ind_fast: Optional[dict],   # 5m
-    ind_mid:  Optional[dict],   # 15m (confirmation)
+    ind_fast: Optional[dict],
+    ind_mid:  Optional[dict],
 ) -> dict:
-    """
-    Score a scalping opportunity.
-    Returns a result dict with:
-        direction: 'LONG' | 'SHORT' | None
-        confidence: 0-100
-        reasons: list of triggered conditions
-        raw_scores: dict of per-indicator contribution
-    """
     if not ind_fast:
+        return _empty()
+
+    ind = ind_fast
+    conf = ind_mid
+
+    # ━━ MARKET REGIME GATE ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    regime = ind.get("market_regime", "unknown")
+    if regime == "choppy":
+        logger.debug("Scalp rejected: choppy market regime")
+        return _empty()
+
+    # ── Candle quality filter ─────────────────────────────────────────────────
+    body_pct = ind.get("body_pct", 0)
+    if body_pct < 0.35:
+        logger.debug("Scalp skipped: doji/indecision candle (body_pct={:.2f})".format(body_pct))
         return _empty()
 
     long_score  = 0
@@ -48,17 +53,7 @@ def score_scalp(
     long_reasons  = []
     short_reasons = []
 
-    ind = ind_fast
-    conf = ind_mid  # optional confirmation on higher TF
-
-    # ── Candle quality filter ─────────────────────────────────────────────────
-    # Skip doji / indecision candles (body < 40% of range)
-    body_pct = ind.get("body_pct", 0)
-    if body_pct < 0.35:
-        logger.debug("Scalp skipped: doji/indecision candle (body_pct={:.2f})".format(body_pct))
-        return _empty()
-
-    # ── RSI (weight 18) ──────────────────────────────────────────────────────
+    # ── RSI (weight 16) ──────────────────────────────────────────────────────
     if ind.get("rsi") is not None:
         rsi = ind["rsi"]
         if rsi < RSI_OVERSOLD:
@@ -72,7 +67,7 @@ def score_scalp(
         elif rsi > 60:
             short_score += SCALP_WEIGHTS["rsi"] * 0.3
 
-    # ── MACD cross (weight 18) ────────────────────────────────────────────────
+    # ── MACD cross (weight 16) ────────────────────────────────────────────────
     if ind.get("macd_cross_bull"):
         long_score += SCALP_WEIGHTS["macd"]
         long_reasons.append("MACD bullish cross")
@@ -81,27 +76,25 @@ def score_scalp(
         short_reasons.append("MACD bearish cross")
     elif ind.get("macd_hist") is not None:
         h = ind["macd_hist"]
-        # Histogram without crossover — reduced to 30% (was 50%)
         if h > 0:
             long_score  += SCALP_WEIGHTS["macd"] * 0.3
         elif h < 0:
             short_score += SCALP_WEIGHTS["macd"] * 0.3
 
-    # ── EMA alignment (weight 15) ─────────────────────────────────────────────
+    # ── EMA alignment (weight 14) ─────────────────────────────────────────────
     if ind.get("ema_bull"):
         long_score += SCALP_WEIGHTS["ema"]
         long_reasons.append("EMA 9>21>50 bullish stack")
     elif ind.get("ema_bear"):
         short_score += SCALP_WEIGHTS["ema"]
         short_reasons.append("EMA 9<21<50 bearish stack")
-    # Price vs EMA9 — reduced to 30% (was 40%)
     elif ind.get("price") and ind.get("ema9"):
         if ind["price"] > ind["ema9"]:
             long_score  += SCALP_WEIGHTS["ema"] * 0.3
         else:
             short_score += SCALP_WEIGHTS["ema"] * 0.3
 
-    # ── Bollinger Band (weight 15) ────────────────────────────────────────────
+    # ── Bollinger Band (weight 14) ────────────────────────────────────────────
     if ind.get("bb_lower") and ind.get("price") and ind.get("bb_upper"):
         price   = ind["price"]
         bb_low  = ind["bb_lower"]
@@ -115,7 +108,6 @@ def score_scalp(
             short_score += SCALP_WEIGHTS["bb"]
             short_reasons.append("Price at BB upper band")
         elif squeeze:
-            # BB squeeze — direction determined by EMA lean
             if ind.get("ema_bull"):
                 long_score  += SCALP_WEIGHTS["bb"] * 0.6
                 long_reasons.append("BB squeeze (bull bias)")
@@ -123,9 +115,9 @@ def score_scalp(
                 short_score += SCALP_WEIGHTS["bb"] * 0.6
                 short_reasons.append("BB squeeze (bear bias)")
 
-    # ── Stochastic (weight 12) ────────────────────────────────────────────────
+    # ── Stochastic (weight 10) ────────────────────────────────────────────────
     if ind.get("stoch_k") is not None and ind.get("stoch_d") is not None:
-        sk, sd = ind["stoch_k"], ind["stoch_d"]
+        sk = ind["stoch_k"]
         if ind.get("stoch_bull") or (sk < STOCH_OVERSOLD):
             long_score += SCALP_WEIGHTS["stoch"]
             long_reasons.append(f"Stochastic oversold ({sk:.1f})")
@@ -133,7 +125,7 @@ def score_scalp(
             short_score += SCALP_WEIGHTS["stoch"]
             short_reasons.append(f"Stochastic overbought ({sk:.1f})")
 
-    # ── RSI divergence (weight 10) — high quality reversal signal ─────────────
+    # ── RSI divergence (weight 8) ─────────────────────────────────────────────
     if ind.get("rsi_bull_div"):
         long_score += SCALP_WEIGHTS["divergence"]
         long_reasons.append("RSI bullish divergence")
@@ -141,10 +133,25 @@ def score_scalp(
         short_score += SCALP_WEIGHTS["divergence"]
         short_reasons.append("RSI bearish divergence")
 
-    # ── Volume spike (weight 12) ──────────────────────────────────────────────
+    # ── VWAP confirmation (weight 6) ──────────────────────────────────────────
+    if ind.get("above_vwap") is True and long_score > short_score:
+        long_score += SCALP_WEIGHTS["vwap"]
+        long_reasons.append("Price above VWAP")
+    elif ind.get("above_vwap") is False and short_score > long_score:
+        short_score += SCALP_WEIGHTS["vwap"]
+        short_reasons.append("Price below VWAP")
+
+    # ── Price structure (weight 6) ────────────────────────────────────────────
+    if ind.get("structure_bull"):
+        long_score += SCALP_WEIGHTS["structure"]
+        long_reasons.append("Bull price structure")
+    if ind.get("structure_bear"):
+        short_score += SCALP_WEIGHTS["structure"]
+        short_reasons.append("Bear price structure")
+
+    # ── Volume spike (weight 10) ──────────────────────────────────────────────
     if ind.get("vol_spike"):
         vr = ind.get("vol_ratio", 1)
-        # Amplify whichever direction is already winning
         bonus = min(SCALP_WEIGHTS["volume"] * min(vr - 1, 1), SCALP_WEIGHTS["volume"])
         if long_score >= short_score:
             long_score  += bonus
@@ -158,7 +165,6 @@ def score_scalp(
         htf_bull = conf.get("ema_bull") or (conf.get("macd_hist", 0) or 0) > 0
         htf_bear = conf.get("ema_bear") or (conf.get("macd_hist", 0) or 0) < 0
 
-        # Bonus if HTF agrees
         if htf_bull and long_score > short_score:
             long_score  = min(long_score  + 8, 100)
             long_reasons.append("15m TF confirms bull")
@@ -166,7 +172,6 @@ def score_scalp(
             short_score = min(short_score + 8, 100)
             short_reasons.append("15m TF confirms bear")
 
-        # PENALTY if HTF actively disagrees — cut winning score by 30%
         if long_score > short_score and htf_bear and not htf_bull:
             long_score *= 0.7
         if short_score > long_score and htf_bull and not htf_bear:
@@ -185,6 +190,22 @@ def score_scalp(
         direction  = "SHORT"
         confidence = min(round(short_score), 100)
         reasons    = short_reasons
+
+    if not direction:
+        return _empty()
+
+    # ━━ S/R PROXIMITY CHECK ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    price = ind.get("price", 0)
+    sr_status = _sr_risk(
+        price, direction,
+        ind.get("nearest_resistance"), ind.get("nearest_support"),
+        SR_BLOCK_PROXIMITY_PCT, SR_PENALTY_PROXIMITY_PCT,
+    )
+    if sr_status == "blocked":
+        logger.debug(f"Scalp {direction} rejected: too close to S/R level")
+        return _empty()
+    elif sr_status == "close":
+        confidence = int(confidence * 0.8)
 
     return {
         "direction":   direction,

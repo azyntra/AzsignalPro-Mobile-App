@@ -49,6 +49,11 @@ class SignalRecord(Base):
     outcome          = Column(String, nullable=True)     # TP1 / TP2 / TP3 / SL / OPEN
     profit_pct       = Column(Float, nullable=True)
 
+    # Trailing stop tracking (Phase 2)
+    highest_tp_hit   = Column(String, nullable=True)     # TP1 / TP2 / None
+    adjusted_sl      = Column(Float, nullable=True)      # dynamically moved SL
+    partial_profit_pct = Column(Float, nullable=True)    # locked-in profit %
+
     reasons_json     = Column(Text)
     indicators_json  = Column(Text, nullable=True)
 

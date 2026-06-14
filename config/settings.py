@@ -98,6 +98,41 @@ TP1_R = 1.0
 TP2_R = 2.0
 TP3_R = 3.5
 
+# ── Trailing stop / partial close ──────────────────────────────────────────────
+TRAILING_STOP_ENABLED   = True
+BREAKEVEN_TRIGGER       = 0.5    # move SL to entry when price reaches 50% of TP1
+# When TP1 hit → SL moves to 50% between entry and TP1
+# When TP2 hit → SL moves to TP1
+# When TP3 hit → close fully
+
+# ── Cooldown after consecutive losses ─────────────────────────────────────────
+LOSS_STREAK_PAUSE       = 3      # pause after N consecutive SL hits
+LOSS_STREAK_COOLDOWN_MIN = 120   # cooldown duration in minutes
+
+# ── Market regime thresholds ──────────────────────────────────────────────────
+# Trending: ADX > 25, BB width > 0.06 → trend-following signals only
+# Ranging:  ADX < 20, BB width < 0.04 → mean-reversion only
+# Choppy:   everything else → NO signals
+REGIME_TRENDING_ADX     = 25     # ADX above this = trending
+REGIME_RANGING_ADX      = 20     # ADX below this = ranging
+REGIME_TRENDING_BBW     = 0.06   # BB width above this supports trend
+REGIME_RANGING_BBW      = 0.04   # BB width below this supports range
+
+# ── Adaptive confidence (win-rate feedback loop) ──────────────────────────────
+ADAPTIVE_CONFIDENCE     = True
+ADAPTIVE_LOOKBACK_DAYS  = 7      # look at last N days of performance
+ADAPTIVE_MIN_SIGNALS    = 5      # need at least N signals before applying penalty
+ADAPTIVE_BLOCK_WINRATE  = 10     # block direction if win rate < this %
+
+# ── Support / Resistance ──────────────────────────────────────────────────────
+SR_LOOKBACK_CANDLES     = 20     # candles to look back for swing highs/lows
+SR_BLOCK_PROXIMITY_PCT  = 1.0    # block signal if < this % from S/R level
+SR_PENALTY_PROXIMITY_PCT = 2.0   # reduce score if < this % from S/R level
+
+# ── Smart coin selection ──────────────────────────────────────────────────────
+SMART_COIN_SELECTION    = True
+MAX_TRADABLE_COINS      = 50     # only scan top N most tradable coins
+
 # ── Database ───────────────────────────────────────────────────────────────────
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///signals.db")
 

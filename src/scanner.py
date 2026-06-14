@@ -1,7 +1,7 @@
 """
 scanner.py — Orchestrates the full signal scanning loop.
-For each exchange × symbol × timeframe → indicators → score → validate → send.
-Runs scalping and swing scans on their own schedules.
+v2.0: Added loss-streak cooldown, adaptive confidence multiplier,
+      and direction blocking from win-rate feedback.
 """
 import asyncio
 import random
@@ -12,6 +12,9 @@ from src.data.coin_universe import fetch_top_coins, build_pairs
 from src.analysis.indicators import compute_indicators
 from src.analysis.scalping   import score_scalp
 from src.analysis.swing      import score_swing
+from src.analysis.adaptive   import (
+    get_confidence_multiplier, is_direction_blocked, is_on_loss_cooldown,
+)
 from src.signals.validator   import validate_and_build
 from src.signals.formatter   import format_signal, format_summary_report, format_error_alert
 from src.delivery.telegram_bot import send_signal, send_admin
@@ -19,13 +22,12 @@ from src.database.db_logger  import save_signal, is_duplicate, init_db
 
 from config.settings import (
     SCALPING_TIMEFRAMES, SWING_TIMEFRAMES, MIN_VOLUME_USDT,
-    SPOT_EXCHANGE,
+    SPOT_EXCHANGE, MIN_CONFIDENCE,
 )
 from config.logger import get_logger
 
 logger = get_logger(__name__)
 
-# Exchanges to scan — public data only needed for signals (no API key required for read)
 SCAN_EXCHANGES = ["binance", "bybit", "okx"]
 MARKET_TYPES   = ["spot", "futures"]
 
@@ -33,7 +35,6 @@ MARKET_TYPES   = ["spot", "futures"]
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 async def _get_pairs(exchange: str, market_type: str) -> list[str]:
-    """Get top-N valid pairs for an exchange."""
     top_coins = fetch_top_coins()
     ex_symbols = await get_exchange_symbols(exchange, market_type)
     pairs = build_pairs(ex_symbols, top_coins)
@@ -42,8 +43,7 @@ async def _get_pairs(exchange: str, market_type: str) -> list[str]:
 
 
 async def _process_scalp(exchange: str, symbol: str, market_type: str):
-    """Run scalping analysis for one symbol."""
-    tfs = SCALPING_TIMEFRAMES  # ["1m", "5m", "15m"]
+    tfs = SCALPING_TIMEFRAMES
     data = await fetch_multi_timeframe(exchange, symbol, tfs, market_type)
 
     if "5m" not in data:
@@ -60,11 +60,23 @@ async def _process_scalp(exchange: str, symbol: str, market_type: str):
     if not result["direction"]:
         return
 
+    # ── Adaptive: check if direction is blocked ──────────────────────────────
+    if is_direction_blocked(result["direction"], "scalp"):
+        logger.debug(f"Scalp {result['direction']} blocked by adaptive (low win rate)")
+        return
+
     signal = validate_and_build(result, market_type, style="scalp")
     if not signal:
         return
 
-    # Dedup: don't resend same direction in last 30 min
+    # ── Adaptive: apply confidence multiplier ────────────────────────────────
+    mult = get_confidence_multiplier(signal["direction"], "scalp", exchange)
+    adjusted_conf = int(signal["confidence"] * mult)
+    if adjusted_conf < MIN_CONFIDENCE:
+        logger.debug(f"Scalp signal dropped: adaptive reduced conf {signal['confidence']}→{adjusted_conf}")
+        return
+    signal["confidence"] = adjusted_conf
+
     if is_duplicate(symbol, exchange, signal["direction"], "scalp", window_minutes=30):
         logger.debug(f"Duplicate scalp signal skipped: {symbol} {signal['direction']}")
         return
@@ -76,8 +88,7 @@ async def _process_scalp(exchange: str, symbol: str, market_type: str):
 
 
 async def _process_swing(exchange: str, symbol: str, market_type: str):
-    """Run swing analysis for one symbol."""
-    tfs  = SWING_TIMEFRAMES  # ["1h", "4h", "1d"]
+    tfs  = SWING_TIMEFRAMES
     data = await fetch_multi_timeframe(exchange, symbol, tfs, market_type)
 
     if "4h" not in data:
@@ -94,9 +105,22 @@ async def _process_swing(exchange: str, symbol: str, market_type: str):
     if not result["direction"]:
         return
 
+    # ── Adaptive: check if direction is blocked ──────────────────────────────
+    if is_direction_blocked(result["direction"], "swing"):
+        logger.debug(f"Swing {result['direction']} blocked by adaptive (low win rate)")
+        return
+
     signal = validate_and_build(result, market_type, style="swing")
     if not signal:
         return
+
+    # ── Adaptive: apply confidence multiplier ────────────────────────────────
+    mult = get_confidence_multiplier(signal["direction"], "swing", exchange)
+    adjusted_conf = int(signal["confidence"] * mult)
+    if adjusted_conf < MIN_CONFIDENCE:
+        logger.debug(f"Swing signal dropped: adaptive reduced conf {signal['confidence']}→{adjusted_conf}")
+        return
+    signal["confidence"] = adjusted_conf
 
     if is_duplicate(symbol, exchange, signal["direction"], "swing", window_minutes=240):
         logger.debug(f"Duplicate swing signal skipped: {symbol} {signal['direction']}")
@@ -112,19 +136,26 @@ async def _process_swing(exchange: str, symbol: str, market_type: str):
 
 async def run_scalp_scan():
     """Full scalping scan across all exchanges and pairs."""
+
+    # ── Loss streak cooldown check ───────────────────────────────────────────
+    if is_on_loss_cooldown():
+        logger.info("═══ SCALP SCAN skipped: loss streak cooldown active ═══")
+        await send_admin("⚠️ <b>Scanner paused</b>\n\n"
+                         f"3+ consecutive losses detected.\n"
+                         f"Cooldown active — scanner will resume automatically.")
+        return
+
     logger.info("═══ SCALP SCAN started ═══")
-    total_signals = 0
 
     for exchange in SCAN_EXCHANGES:
         for market_type in MARKET_TYPES:
             try:
                 pairs = await _get_pairs(exchange, market_type)
-                # Shuffle so we don't always hit the same pairs first (rate limit fairness)
                 random.shuffle(pairs)
                 for symbol in pairs:
                     try:
                         await _process_scalp(exchange, symbol, market_type)
-                        await asyncio.sleep(0.3)  # gentle rate limiting
+                        await asyncio.sleep(0.3)
                     except Exception as e:
                         logger.debug(f"Scalp error {symbol}: {e}")
             except Exception as e:
@@ -136,6 +167,12 @@ async def run_scalp_scan():
 
 async def run_swing_scan():
     """Full swing scan across all exchanges and pairs."""
+
+    # ── Loss streak cooldown check ───────────────────────────────────────────
+    if is_on_loss_cooldown():
+        logger.info("═══ SWING SCAN skipped: loss streak cooldown active ═══")
+        return
+
     logger.info("═══ SWING SCAN started ═══")
 
     for exchange in SCAN_EXCHANGES:
