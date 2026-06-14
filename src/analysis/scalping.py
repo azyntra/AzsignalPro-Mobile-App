@@ -187,7 +187,14 @@ def score_scalp(
         reasons    = short_reasons
 
     if not direction:
-        return _empty()
+        return {
+            "direction":   None,
+            "confidence":  0,
+            "reasons":     reasons,
+            "long_score":  round(long_score, 1),
+            "short_score": round(short_score, 1),
+            "indicators":  ind,
+        }
 
     # ━━ S/R PROXIMITY CHECK ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     price = ind.get("price", 0)
