@@ -48,9 +48,9 @@ MAX_SIGNALS_PER_HOUR = int(os.getenv("MAX_SIGNALS_PER_HOUR", 10))
 QUOTE_CURRENCY       = "USDT"
 
 # ── Signal quality thresholds ──────────────────────────────────────────────────
-MIN_CONFIDENCE       = 35.0
+MIN_CONFIDENCE       = 70.0
 MIN_RR_RATIO         = 1.5
-MIN_INDICATORS_AGREE = 0      # minimum number of indicators that must agree
+MIN_INDICATORS_AGREE = 2      # minimum number of indicators that must agree
 
 # ── Indicator parameters ───────────────────────────────────────────────────────
 RSI_PERIOD           = 14
