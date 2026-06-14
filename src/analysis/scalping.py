@@ -177,11 +177,11 @@ def score_scalp(
     long_score *= choppy_penalty
     short_score *= choppy_penalty
 
-    if long_score > short_score and long_score >= 50:
+    if long_score > short_score and long_score >= 40:
         direction  = "LONG"
         confidence = min(round(long_score), 100)
         reasons    = long_reasons
-    elif short_score > long_score and short_score >= 50:
+    elif short_score > long_score and short_score >= 40:
         direction  = "SHORT"
         confidence = min(round(short_score), 100)
         reasons    = short_reasons
