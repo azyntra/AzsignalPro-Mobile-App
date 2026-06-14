@@ -38,9 +38,7 @@ def score_scalp(
 
     # ━━ MARKET REGIME GATE ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     regime = ind.get("market_regime", "unknown")
-    if regime == "choppy":
-        logger.debug("Scalp rejected: choppy market regime")
-        return _empty()
+    choppy_penalty = 0.8 if regime == "choppy" else 1.0
 
     # ── Candle quality filter ─────────────────────────────────────────────────
     body_pct = ind.get("body_pct", 0)
@@ -181,6 +179,9 @@ def score_scalp(
     direction = None
     confidence = 0
     reasons = []
+
+    long_score *= choppy_penalty
+    short_score *= choppy_penalty
 
     if long_score > short_score and long_score >= 50:
         direction  = "LONG"

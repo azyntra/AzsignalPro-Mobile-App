@@ -48,8 +48,8 @@ MAX_SIGNALS_PER_HOUR = int(os.getenv("MAX_SIGNALS_PER_HOUR", 10))
 QUOTE_CURRENCY       = "USDT"
 
 # ── Signal quality thresholds ──────────────────────────────────────────────────
-MIN_CONFIDENCE       = float(os.getenv("MIN_CONFIDENCE", 75))
-MIN_RR_RATIO         = float(os.getenv("MIN_RR_RATIO", 2.5))
+MIN_CONFIDENCE       = float(os.getenv("MIN_CONFIDENCE", 70))
+MIN_RR_RATIO         = float(os.getenv("MIN_RR_RATIO", 2.0))
 MIN_INDICATORS_AGREE = 4      # minimum number of indicators that must agree
 
 # ── Indicator parameters ───────────────────────────────────────────────────────
