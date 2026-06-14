@@ -40,30 +40,33 @@ def validate_and_build(
         return None
 
     if confidence < MIN_CONFIDENCE:
+        logger.info(f"Signal rejected: Confidence {confidence} < {MIN_CONFIDENCE}")
         return None
 
     if len(reasons) < MIN_INDICATORS_AGREE:
+        logger.info(f"Signal rejected: len(reasons) {len(reasons)} < {MIN_INDICATORS_AGREE}")
         return None
 
     price = ind.get("price")
     atr   = ind.get("atr")
 
     if not price or price <= 0:
+        logger.info(f"Signal rejected: invalid price {price}")
         return None
 
     # ── Spot market: SHORT not possible ───────────────────────────────────────
     if market_type == "spot" and direction == "SHORT":
-        logger.debug("Signal rejected: cannot SHORT on spot market")
+        logger.info(f"Signal rejected: cannot SHORT on spot market")
         return None
 
     # ── Counter-trend block ───────────────────────────────────────────────────
     # Reject signals that go against the EMA200 macro trend
     if COUNTER_TREND_BLOCK and ind.get("above_200") is not None:
         if direction == "LONG" and ind["above_200"] is False:
-            logger.debug(f"Signal rejected: LONG below EMA200 (counter-trend)")
+            logger.info(f"Signal rejected: LONG but price < EMA200 ({price} < {ema200})")
             return None
         if direction == "SHORT" and ind["above_200"] is True:
-            logger.debug(f"Signal rejected: SHORT above EMA200 (counter-trend)")
+            logger.info(f"Signal rejected: SHORT but price > EMA200 ({price} > {ema200})")
             return None
 
     # ── Stop loss using ATR (style-aware multiplier) ──────────────────────────
@@ -107,7 +110,7 @@ def validate_and_build(
     rr_ratio = tp2_pct / risk_pct if risk_pct else 0
 
     if rr_ratio < MIN_RR_RATIO:
-        logger.debug(f"Signal rejected: R:R {rr_ratio:.2f} < {MIN_RR_RATIO}")
+        logger.info(f"Signal rejected: R:R {rr_ratio:.2f} < {MIN_RR_RATIO}")
         return None
 
     # ── Suggested leverage ────────────────────────────────────────────────────
