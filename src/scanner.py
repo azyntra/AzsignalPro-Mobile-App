@@ -15,6 +15,9 @@ from src.analysis.swing      import score_swing
 from src.analysis.adaptive   import (
     get_confidence_multiplier, is_direction_blocked, is_on_loss_cooldown,
 )
+from src.analysis.ai_filter  import review_signal
+from src.analysis.ml_predictor import predict_win_probability
+from src.analysis.sentiment  import get_fear_greed_index, apply_sentiment_bias
 from src.signals.validator   import validate_and_build
 from src.signals.formatter   import format_signal, format_summary_report, format_error_alert
 from src.delivery.telegram_bot import send_signal, send_admin
@@ -69,6 +72,29 @@ async def _process_scalp(exchange: str, symbol: str, market_type: str):
     if not signal:
         return
 
+    # ── AI & ML Pipeline ─────────────────────────────────────────────────────
+    sentiment = get_fear_greed_index()
+    
+    # 1. Self-Learning ML Predictor
+    ml_prob = predict_win_probability(result.get("indicators", {}), signal["direction"], "scalp")
+    signal["ml_win_prob"] = ml_prob
+    if ml_prob < 0.40:
+        logger.debug(f"Scalp {signal['direction']} dropped: low ML win prob {ml_prob:.2f}")
+        return
+        
+    # 2. Gemini AI Filter
+    ai_review = await review_signal(result, symbol, exchange, "scalp", market_type, sentiment)
+    if ai_review.get("action") == "REJECT":
+        logger.debug(f"Scalp {signal['direction']} REJECTED by AI: {ai_review.get('reasoning')}")
+        return
+    
+    signal["confidence"] = ai_review.get("adjusted_confidence", signal["confidence"])
+    signal["ai_reasoning"] = ai_review.get("reasoning", "")
+    
+    # 3. Sentiment Bias
+    signal["confidence"] = apply_sentiment_bias(signal["confidence"], signal["direction"], sentiment)
+    signal["sentiment"] = sentiment
+
     # ── Adaptive: apply confidence multiplier ────────────────────────────────
     mult = get_confidence_multiplier(signal["direction"], "scalp", exchange)
     adjusted_conf = int(signal["confidence"] * mult)
@@ -83,7 +109,7 @@ async def _process_scalp(exchange: str, symbol: str, market_type: str):
 
     text = format_signal(signal, symbol, exchange, "scalp", "5m", market_type)
     msg_id = await send_signal(text)
-    save_signal(signal, symbol, exchange, market_type, "scalp", "5m", msg_id)
+    save_signal(signal, symbol, exchange, market_type, "scalp", "5m", msg_id, ai_review)
     logger.info(f"✅ Scalp signal: {symbol} {signal['direction']} conf={signal['confidence']}%")
 
 
@@ -114,6 +140,29 @@ async def _process_swing(exchange: str, symbol: str, market_type: str):
     if not signal:
         return
 
+    # ── AI & ML Pipeline ─────────────────────────────────────────────────────
+    sentiment = get_fear_greed_index()
+    
+    # 1. Self-Learning ML Predictor
+    ml_prob = predict_win_probability(result.get("indicators", {}), signal["direction"], "swing")
+    signal["ml_win_prob"] = ml_prob
+    if ml_prob < 0.40:
+        logger.debug(f"Swing {signal['direction']} dropped: low ML win prob {ml_prob:.2f}")
+        return
+        
+    # 2. Gemini AI Filter
+    ai_review = await review_signal(result, symbol, exchange, "swing", market_type, sentiment)
+    if ai_review.get("action") == "REJECT":
+        logger.debug(f"Swing {signal['direction']} REJECTED by AI: {ai_review.get('reasoning')}")
+        return
+    
+    signal["confidence"] = ai_review.get("adjusted_confidence", signal["confidence"])
+    signal["ai_reasoning"] = ai_review.get("reasoning", "")
+    
+    # 3. Sentiment Bias
+    signal["confidence"] = apply_sentiment_bias(signal["confidence"], signal["direction"], sentiment)
+    signal["sentiment"] = sentiment
+
     # ── Adaptive: apply confidence multiplier ────────────────────────────────
     mult = get_confidence_multiplier(signal["direction"], "swing", exchange)
     adjusted_conf = int(signal["confidence"] * mult)
@@ -128,7 +177,7 @@ async def _process_swing(exchange: str, symbol: str, market_type: str):
 
     text = format_signal(signal, symbol, exchange, "swing", "4h", market_type)
     msg_id = await send_signal(text)
-    save_signal(signal, symbol, exchange, market_type, "swing", "4h", msg_id)
+    save_signal(signal, symbol, exchange, market_type, "swing", "4h", msg_id, ai_review)
     logger.info(f"✅ Swing signal: {symbol} {signal['direction']} conf={signal['confidence']}%")
 
 

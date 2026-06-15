@@ -63,6 +63,11 @@ class SignalRecord(Base):
     created_at   = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     closed_at    = Column(DateTime, nullable=True)
 
+    # AI tracking (Phase 1)
+    ai_decision             = Column(String, nullable=True)
+    ai_adjusted_confidence  = Column(Integer, nullable=True)
+    ai_reasoning            = Column(Text, nullable=True)
+
 
 def init_db():
     Base.metadata.create_all(bind=engine)
@@ -77,6 +82,7 @@ def save_signal(
     style: str,
     timeframe: str,
     telegram_msg_id: Optional[int] = None,
+    ai_review: Optional[dict] = None,
 ) -> SignalRecord:
     with SessionLocal() as db:
         record = SignalRecord(
@@ -96,8 +102,12 @@ def save_signal(
             rr_ratio         = signal.get("rr_ratio"),
             price_at_signal  = signal.get("price"),
             reasons_json     = json.dumps(signal.get("reasons", [])),
+            indicators_json  = json.dumps(signal.get("indicators", {})),
             sent_to_telegram = telegram_msg_id is not None,
             telegram_msg_id  = telegram_msg_id,
+            ai_decision            = ai_review.get("action") if ai_review else None,
+            ai_adjusted_confidence = ai_review.get("adjusted_confidence") if ai_review else None,
+            ai_reasoning           = ai_review.get("reasoning") if ai_review else None,
         )
         db.add(record)
         db.commit()

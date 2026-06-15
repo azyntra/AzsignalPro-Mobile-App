@@ -86,8 +86,14 @@ def format_signal(
     bar = _confidence_bar(conf)
     lines += [
         f"📊 <b>CONFIDENCE</b>: {bar} {_e(conf)}%",
-        "",
     ]
+    if "ai_reasoning" in signal and signal["ai_reasoning"]:
+        lines.append(f"🤖 <b>AI View</b>: {_e(signal['ai_reasoning'])}")
+    if "ml_win_prob" in signal and signal["ml_win_prob"]:
+        lines.append(f"🧠 <b>ML Win Prob</b>: {_e(round(signal['ml_win_prob']*100))}%")
+    if "sentiment" in signal and signal["sentiment"]:
+        lines.append(f"🌐 <b>Sentiment</b>: {_e(signal['sentiment']['label'])}")
+    lines.append("")
 
     # ── Setup reasons ─────────────────────────────────────────────────────────
     lines.append(f"🔍 <b>SETUP</b>")

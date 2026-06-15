@@ -7,10 +7,25 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# ── Telegram ───────────────────────────────────────────────────────────────────
-TELEGRAM_BOT_TOKEN   = os.getenv("TELEGRAM_BOT_TOKEN", "")
-TELEGRAM_CHANNEL_ID  = os.getenv("TELEGRAM_CHANNEL_ID", "")   # set after creating channel
-TELEGRAM_ADMIN_ID    = os.getenv("TELEGRAM_ADMIN_ID", "")
+# ── Delivery ──────────────────────────────────────────────────────────────────
+TELEGRAM_BOT_TOKEN      = os.getenv("TELEGRAM_BOT_TOKEN")
+TELEGRAM_CHANNEL_ID     = os.getenv("TELEGRAM_CHANNEL_ID")
+TELEGRAM_ADMIN_ID       = os.getenv("TELEGRAM_ADMIN_ID")
+MAX_SIGNALS_PER_HOUR    = int(os.getenv("MAX_SIGNALS_PER_HOUR", 10))
+
+# ── AI & ML Settings ──────────────────────────────────────────────────────────
+# Phase 1: Gemini AI Filter
+GEMINI_API_KEY          = os.getenv("GEMINI_API_KEY")
+AI_FILTER_ENABLED       = True
+AI_MODEL                = "gemini-2.5-flash"
+
+# Phase 2: ML Predictor
+ML_PREDICTOR_ENABLED    = False  # Enable after 100+ closed signals
+ML_MIN_TRAINING_SIGNALS = 100
+
+# Phase 3: Market Sentiment (Fear & Greed)
+SENTIMENT_ENABLED       = True
+SENTIMENT_EXTREME_BOOST = 10
 
 # ── Exchange API keys ──────────────────────────────────────────────────────────
 EXCHANGE_CREDENTIALS = {
