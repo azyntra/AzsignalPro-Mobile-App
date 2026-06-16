@@ -27,7 +27,6 @@ from config.logger import get_logger
 logger = get_logger(__name__)
 
 _bot: Optional[Bot] = None
-_sent_this_hour: list = []
 
 
 # ── Core send helpers ──────────────────────────────────────────────────────────
@@ -42,14 +41,8 @@ async def get_bot() -> Bot:
 async def send_signal(text: str) -> Optional[int]:
     """
     Send a message to the configured Telegram channel.
-    Enforces hourly rate limit. Returns message_id or None.
+    Returns message_id or None.
     """
-    now = time.time()
-    _sent_this_hour[:] = [t for t in _sent_this_hour if now - t < 3600]
-
-    if len(_sent_this_hour) >= MAX_SIGNALS_PER_HOUR:
-        logger.warning(f"Rate limit reached ({MAX_SIGNALS_PER_HOUR}/hr). Skipping.")
-        return None
 
     try:
         bot = await get_bot()
@@ -59,7 +52,6 @@ async def send_signal(text: str) -> Optional[int]:
             parse_mode=ParseMode.HTML,
             disable_web_page_preview=True,
         )
-        _sent_this_hour.append(now)
         logger.info(f"Message sent to channel (msg_id={msg.message_id})")
         return msg.message_id
     except TelegramError as e:
@@ -219,7 +211,6 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     from src.database.db_logger import SessionLocal, SignalRecord
     from sqlalchemy import func as sqlfunc
 
-    signals_this_hour = len(_sent_this_hour)
     with SessionLocal() as db:
         total_db = db.query(sqlfunc.count(SignalRecord.id)).scalar() or 0
         open_db  = db.query(sqlfunc.count(SignalRecord.id)).filter(
@@ -228,7 +219,6 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(
         f"✅ <b>Bot Status</b>\n\n"
-        f"Signals sent this hour: {signals_this_hour}/{MAX_SIGNALS_PER_HOUR}\n"
         f"Total signals in DB:    {total_db}\n"
         f"Open (being tracked):   {open_db}\n\n"
         f"Outcome tracker:  ✅ running every 60s\n"
