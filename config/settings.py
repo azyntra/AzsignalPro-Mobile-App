@@ -57,14 +57,14 @@ EXCHANGE_CREDENTIALS = {
 SPOT_EXCHANGE = "binance"
 
 # ── Market scan settings ───────────────────────────────────────────────────────
-TOP_N_COINS          = int(os.getenv("TOP_N_COINS", 100))
-MIN_VOLUME_USDT      = float(os.getenv("MIN_VOLUME_USDT", 1_000_000))
-MAX_SIGNALS_PER_HOUR = int(os.getenv("MAX_SIGNALS_PER_HOUR", 10))
+TOP_N_COINS          = int(os.getenv("TOP_N_COINS", 150))
+MIN_VOLUME_USDT      = float(os.getenv("MIN_VOLUME_USDT", 500_000))
+MAX_SIGNALS_PER_HOUR = int(os.getenv("MAX_SIGNALS_PER_HOUR", 20))
 QUOTE_CURRENCY       = "USDT"
 
 # ── Signal quality thresholds ──────────────────────────────────────────────────
-MIN_CONFIDENCE_SCALP = 60.0
-MIN_CONFIDENCE_SWING = 65.0
+MIN_CONFIDENCE_SCALP = 55.0
+MIN_CONFIDENCE_SWING = 60.0
 MIN_RR_RATIO         = 1.5
 MIN_INDICATORS_AGREE = 2      # minimum number of indicators that must agree
 
@@ -86,7 +86,7 @@ ADX_TREND_MIN        = 20    # ADX > this = trending market
 ATR_PERIOD           = 14
 ATR_SL_MULTIPLIER    = 1.5   # stop loss = entry ± (ATR × multiplier) — scalp
 ATR_SL_MULTIPLIER_SWING = 2.5  # wider SL for swing trades (4h noise)
-ADX_SWING_MIN        = 25     # stronger trend required for swing signals
+ADX_SWING_MIN        = 20     # stronger trend required for swing signals
 STOCH_K              = 14
 STOCH_D              = 3
 STOCH_OVERSOLD       = 25
@@ -96,7 +96,7 @@ OBV_MA_PERIOD        = 20
 # ── Signal filters ─────────────────────────────────────────────────────────────
 COUNTER_TREND_BLOCK  = False  # penalty instead of block for EMA200 macro trend
 SWING_HTF_REQUIRED   = True   # mandate higher-TF confirmation for swing signals
-MIN_VOLUME_USDT_SWING = float(os.getenv("MIN_VOLUME_USDT_SWING", 5_000_000))
+MIN_VOLUME_USDT_SWING = float(os.getenv("MIN_VOLUME_USDT_SWING", 1_000_000))
 
 # ── Timeframes ─────────────────────────────────────────────────────────────────
 SCALPING_TIMEFRAMES  = ["1m", "5m", "15m"]
@@ -147,7 +147,7 @@ SR_PENALTY_PROXIMITY_PCT = 1.5   # reduce score if < this % from S/R level
 
 # ── Smart coin selection ──────────────────────────────────────────────────────
 SMART_COIN_SELECTION    = True
-MAX_TRADABLE_COINS      = 50     # only scan top N most tradable coins
+MAX_TRADABLE_COINS      = 100     # only scan top N most tradable coins
 
 # ── Database ───────────────────────────────────────────────────────────────────
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///signals.db")
