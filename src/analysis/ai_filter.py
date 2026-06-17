@@ -188,16 +188,31 @@ async def review_signal(
             score_result, symbol, exchange, style, market_type, sentiment
         )
 
-        response = client.models.generate_content(
-            model=AI_MODEL,
-            contents=prompt,
-            config=types.GenerateContentConfig(
-                system_instruction=SYSTEM_PROMPT,
-                temperature=0.1,
-                response_mime_type="application/json",
-                response_schema=REVIEW_SCHEMA,
-            ),
-        )
+        max_retries = 3
+        for attempt in range(max_retries + 1):
+            try:
+                response = client.models.generate_content(
+                    model=AI_MODEL,
+                    contents=prompt,
+                    config=types.GenerateContentConfig(
+                        system_instruction=SYSTEM_PROMPT,
+                        temperature=0.1,
+                        response_mime_type="application/json",
+                        response_schema=REVIEW_SCHEMA,
+                    ),
+                )
+                break  # Success
+            except Exception as e:
+                error_msg = str(e)
+                if ("429" in error_msg or "RESOURCE_EXHAUSTED" in error_msg) and attempt < max_retries:
+                    import re
+                    import asyncio
+                    match = re.search(r'retry in ([\d\.]+)s', error_msg)
+                    delay = float(match.group(1)) + 1.0 if match else 31.0
+                    logger.debug(f"AI filter quota exhausted (429). Sleeping {delay:.1f}s before retry {attempt+1}/{max_retries}...")
+                    await asyncio.sleep(delay)
+                else:
+                    raise e
 
         result_text = response.text.strip()
         result = json.loads(result_text)
