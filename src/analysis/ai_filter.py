@@ -235,5 +235,9 @@ async def review_signal(
         return review
 
     except Exception as e:
-        logger.warning(f"AI filter error: {e} — signal passes through unmodified")
+        error_msg = str(e)
+        if "429" in error_msg or "RESOURCE_EXHAUSTED" in error_msg:
+            logger.debug("AI filter quota exhausted (429) — signal passes through unmodified")
+        else:
+            logger.warning(f"AI filter error: {e} — signal passes through unmodified")
         return fallback
