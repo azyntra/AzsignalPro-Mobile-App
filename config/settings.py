@@ -17,7 +17,7 @@ MAX_SIGNALS_PER_HOUR    = int(os.getenv("MAX_SIGNALS_PER_HOUR", 10))
 # Phase 1: Gemini AI Filter
 GEMINI_API_KEY          = os.getenv("GEMINI_API_KEY")
 AI_FILTER_ENABLED       = True
-AI_MODEL                = "gemini-2.5-flash"
+AI_MODEL                = "gemini-1.5-flash"
 
 # Phase 2: ML Predictor
 ML_PREDICTOR_ENABLED    = False  # Enable after 50+ closed signals
