@@ -271,3 +271,27 @@ async def send_result(text: str) -> Optional[int]:
     except TelegramError as e:
         logger.error(f"Result send error: {e}")
         return None
+
+# ── Webhooks (Phase 1) ────────────────────────────────────────────────────────
+
+async def fire_signal_webhook(signal_data: dict):
+    import aiohttp
+    import os
+    url = os.getenv("API_BACKEND_URL", "http://localhost:3000") + "/api/webhook/signal"
+    secret = os.getenv("WEBHOOK_SECRET", "local-dev-webhook-secret")
+    try:
+        async with aiohttp.ClientSession() as session:
+            await session.post(url, json=signal_data, headers={"X-Webhook-Secret": secret}, timeout=5)
+    except Exception as e:
+        logger.warning(f"Webhook fire failed: {e}")
+
+async def fire_signal_update_webhook(update_data: dict):
+    import aiohttp
+    import os
+    url = os.getenv("API_BACKEND_URL", "http://localhost:3000") + "/api/webhook/signal-update"
+    secret = os.getenv("WEBHOOK_SECRET", "local-dev-webhook-secret")
+    try:
+        async with aiohttp.ClientSession() as session:
+            await session.post(url, json=update_data, headers={"X-Webhook-Secret": secret}, timeout=5)
+    except Exception as e:
+        logger.warning(f"Webhook update fire failed: {e}")

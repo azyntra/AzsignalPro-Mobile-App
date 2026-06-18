@@ -20,7 +20,7 @@ from typing import Optional
 
 from src.database.db_logger import SessionLocal, SignalRecord
 from src.data.fetcher import fetch_ticker_price
-from src.delivery.telegram_bot import send_result
+from src.delivery.telegram_bot import send_result, fire_signal_update_webhook
 from config.settings import TRAILING_STOP_ENABLED, BREAKEVEN_TRIGGER
 from config.logger import get_logger
 
@@ -403,6 +403,15 @@ async def check_open_signals():
             # Handle definitive closes (TP3, SL)
             pnl = _calc_profit(result, rec)
             _close_signal_in_db(rec.id, result, price, pnl)
+            
+            import asyncio
+            asyncio.create_task(fire_signal_update_webhook({
+                "id": rec.id,
+                "outcome": result,
+                "profit_pct": pnl,
+                "price_at_close": price,
+                "closed_at": datetime.now(timezone.utc).isoformat()
+            }))
 
             if _is_within_notify_window(rec):
                 if result == "SL":

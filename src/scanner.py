@@ -20,7 +20,7 @@ from src.analysis.ml_predictor import predict_win_probability
 from src.analysis.sentiment  import get_fear_greed_index, apply_sentiment_bias
 from src.signals.validator   import validate_and_build
 from src.signals.formatter   import format_signal, format_summary_report, format_error_alert
-from src.delivery.telegram_bot import send_signal, send_admin
+from src.delivery.telegram_bot import send_signal, send_admin, fire_signal_webhook
 from src.database.db_logger  import save_signal, is_duplicate, init_db
 
 from config.settings import (
@@ -134,7 +134,35 @@ async def _process_scalp(exchange: str, symbol: str, market_type: str):
 
     text = format_signal(signal, symbol, exchange, "scalp", tf_str, market_type)
     msg_id = await send_signal(text)
-    save_signal(signal, symbol, exchange, market_type, "scalp", tf_str, msg_id, ai_review)
+    record = save_signal(signal, symbol, exchange, market_type, "scalp", tf_str, msg_id, ai_review)
+    
+    webhook_payload = {
+        "id": record.id,
+        "symbol": record.symbol,
+        "exchange": record.exchange,
+        "market_type": record.market_type,
+        "style": record.style,
+        "timeframe": record.timeframe,
+        "direction": record.direction,
+        "confidence": record.confidence,
+        "entry_low": record.entry_low,
+        "entry_high": record.entry_high,
+        "tp1": record.tp1,
+        "tp2": record.tp2,
+        "tp3": record.tp3,
+        "stop_loss": record.stop_loss,
+        "rr_ratio": record.rr_ratio,
+        "price_at_signal": record.price_at_signal,
+        "reasons": signal.get("reasons", []),
+        "indicators": signal.get("indicators", {}),
+        "ai_decision": record.ai_decision,
+        "ai_adjusted_confidence": record.ai_adjusted_confidence,
+        "ai_reasoning": record.ai_reasoning,
+        "created_at": record.created_at.isoformat() if record.created_at else None
+    }
+    import asyncio
+    asyncio.create_task(fire_signal_webhook(webhook_payload))
+    
     logger.info(f"✅ Scalp signal: {symbol} {signal['direction']} conf={signal['confidence']}%")
 
 
@@ -212,7 +240,35 @@ async def _process_swing(exchange: str, symbol: str, market_type: str):
 
     text = format_signal(signal, symbol, exchange, "swing", tf_str, market_type)
     msg_id = await send_signal(text)
-    save_signal(signal, symbol, exchange, market_type, "swing", tf_str, msg_id, ai_review)
+    record = save_signal(signal, symbol, exchange, market_type, "swing", tf_str, msg_id, ai_review)
+    
+    webhook_payload = {
+        "id": record.id,
+        "symbol": record.symbol,
+        "exchange": record.exchange,
+        "market_type": record.market_type,
+        "style": record.style,
+        "timeframe": record.timeframe,
+        "direction": record.direction,
+        "confidence": record.confidence,
+        "entry_low": record.entry_low,
+        "entry_high": record.entry_high,
+        "tp1": record.tp1,
+        "tp2": record.tp2,
+        "tp3": record.tp3,
+        "stop_loss": record.stop_loss,
+        "rr_ratio": record.rr_ratio,
+        "price_at_signal": record.price_at_signal,
+        "reasons": signal.get("reasons", []),
+        "indicators": signal.get("indicators", {}),
+        "ai_decision": record.ai_decision,
+        "ai_adjusted_confidence": record.ai_adjusted_confidence,
+        "ai_reasoning": record.ai_reasoning,
+        "created_at": record.created_at.isoformat() if record.created_at else None
+    }
+    import asyncio
+    asyncio.create_task(fire_signal_webhook(webhook_payload))
+    
     logger.info(f"✅ Swing signal: {symbol} {signal['direction']} conf={signal['confidence']}%")
 
 

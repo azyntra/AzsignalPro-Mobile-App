@@ -1,0 +1,89 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id                  Int       @id @default(autoincrement())
+  email               String    @unique
+  password_hash       String
+  name                String?
+  subscription_tier   String    @default("free") // 'free','basic','pro','elite'
+  subscription_expiry DateTime?
+  revenuecat_user_id  String?
+  created_at          DateTime  @default(now())
+  updated_at          DateTime  @updatedAt
+
+  device_tokens       DeviceToken[]
+  notification_prefs  NotificationPreference?
+}
+
+model DeviceToken {
+  id                  Int       @id @default(autoincrement())
+  user_id             Int
+  expo_push_token     String
+  platform            String    // 'ios' or 'android'
+  is_active           Boolean   @default(true)
+  created_at          DateTime  @default(now())
+  updated_at          DateTime  @updatedAt
+
+  user                User      @relation(fields: [user_id], references: [id], onDelete: Cascade)
+}
+
+model NotificationPreference {
+  id                  Int       @id @default(autoincrement())
+  user_id             Int       @unique
+  enable_scalp        Boolean   @default(true)
+  enable_swing        Boolean   @default(true)
+  enable_long         Boolean   @default(true)
+  enable_short        Boolean   @default(true)
+  min_confidence      Int       @default(70)
+  exchanges           String    @default("[\"okx\",\"bybit\",\"binance\",\"kucoin\"]") // JSON array as string for sqlite
+  quiet_hours_start   String?   // "22:00"
+  quiet_hours_end     String?   // "07:00"
+  created_at          DateTime  @default(now())
+  updated_at          DateTime  @updatedAt
+
+  user                User      @relation(fields: [user_id], references: [id], onDelete: Cascade)
+}
+
+model Signal {
+  id                  Int       @id @default(autoincrement())
+  bot_signal_id       Int?      @unique
+  symbol              String
+  exchange            String
+  market_type         String    // 'spot','futures'
+  style               String    // 'scalp','swing'
+  timeframe           String
+  direction           String    // 'LONG','SHORT'
+  confidence          Float
+  entry_low           Float
+  entry_high          Float
+  tp1                 Float
+  tp2                 Float
+  tp3                 Float
+  tp1_pct             Float
+  tp2_pct             Float
+  tp3_pct             Float
+  stop_loss           Float
+  risk_pct            Float
+  rr_ratio            Float
+  leverage            String
+  price_at_signal     Float
+  price_at_close      Float?
+  outcome             String?   // 'TP1','TP2','TP3','SL','EXPIRED'
+  profit_pct          Float?
+  reasons_json        String    // JSON
+  indicators_json     String    // JSON
+  ai_decision         String?
+  ai_adjusted_conf    Int?
+  ai_reasoning        String?
+  sent_to_telegram    Boolean   @default(false)
+  telegram_msg_id     Int?
+  created_at          DateTime  @default(now())
+  closed_at           DateTime?
+}
