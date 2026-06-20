@@ -63,7 +63,8 @@ router.post('/signal', verifyWebhookSecret, async (req, res) => {
     console.log(`[Webhook] Stored new signal #${signal.id} (Bot ID: ${data.id}): ${signal.direction} ${signal.symbol}`);
 
     // Push notifications to devices
-    const { Expo } = require('expo-server-sdk');
+    const expoModule = await import('expo-server-sdk');
+    const Expo = expoModule.Expo;
     const expo = new Expo();
 
     // Find users with active device tokens (simplified filter for now)
@@ -128,7 +129,8 @@ router.post('/signal-update', verifyWebhookSecret, async (req, res) => {
 
     console.log(`[Webhook Update] Signal ${signal.id} (Bot ID: ${id}) -> ${outcome} (${profit_pct}%)`);
 
-    const { Expo } = require('expo-server-sdk');
+    const expoModule = await import('expo-server-sdk');
+    const Expo = expoModule.Expo;
     const expo = new Expo();
 
     const tokens = await prisma.deviceToken.findMany({

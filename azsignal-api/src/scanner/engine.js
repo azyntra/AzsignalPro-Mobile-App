@@ -149,6 +149,39 @@ async function saveAndBroadcast(signal, symbol, exchange, marketType, style, tim
 
     console.log(`✅ [${style.toUpperCase()}] ${symbol} ${signal.direction} CONF=${signal.confidence}%`);
     broadcastSignal(record);
+
+    // Push notifications to devices
+    try {
+      const expoModule = await import('expo-server-sdk');
+      const Expo = expoModule.Expo;
+      const expo = new Expo();
+
+      const tokens = await prisma.deviceToken.findMany({
+        where: { is_active: true }
+      });
+
+      let messages = [];
+      for (let dt of tokens) {
+        if (!Expo.isExpoPushToken(dt.expo_push_token)) continue;
+        
+        const emoji = signal.direction === 'LONG' ? '🟢' : '🔴';
+        
+        messages.push({
+          to: dt.expo_push_token,
+          sound: 'default',
+          title: `${emoji} ${signal.direction} ${symbol}`,
+          body: `${style.toUpperCase()} | ${exchange.toUpperCase()} | Confidence: ${signal.confidence}% | R:R 1:${signal.rr_ratio}`,
+          data: { signalId: record.id },
+        });
+      }
+
+      const chunks = expo.chunkPushNotifications(messages);
+      for (let chunk of chunks) {
+        await expo.sendPushNotificationsAsync(chunk);
+      }
+    } catch (pushErr) {
+      console.error('Failed to send push notification:', pushErr);
+    }
   } catch (error) {
     console.error('Failed to save signal:', error);
   }
