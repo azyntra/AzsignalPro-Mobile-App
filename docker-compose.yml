@@ -31,7 +31,7 @@ services:
       - api
     environment:
       # Map the python bot to the Node API container over the internal docker network
-      - WEBHOOK_URL=http://api:3000/api/webhook
+      - API_BACKEND_URL=http://api:3000
       - WEBHOOK_SECRET=your_webhook_secret_here
       # Add Binance/Bybit API keys here
       - BINANCE_API_KEY=
