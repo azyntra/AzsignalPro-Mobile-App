@@ -30,15 +30,23 @@ export default function SignalDetailScreen() {
     ? ['rgba(16, 185, 129, 0.15)', 'rgba(2, 6, 23, 0.95)'] 
     : ['rgba(239, 68, 68, 0.15)', 'rgba(2, 6, 23, 0.95)'];
 
-  // Parse JSON fields
+  // Parse JSON fields safely (handle both string and already-parsed object/array)
   let reasons: string[] = [];
   try {
-    if (signal.reasons_json) reasons = JSON.parse(signal.reasons_json);
+    if (Array.isArray(signal.reasons_json)) {
+      reasons = signal.reasons_json;
+    } else if (typeof signal.reasons_json === 'string') {
+      reasons = JSON.parse(signal.reasons_json);
+    }
   } catch (e) {}
 
   let indicators: any = {};
   try {
-    if (signal.indicators_json) indicators = JSON.parse(signal.indicators_json);
+    if (typeof signal.indicators_json === 'object' && signal.indicators_json !== null && !Array.isArray(signal.indicators_json)) {
+      indicators = signal.indicators_json;
+    } else if (typeof signal.indicators_json === 'string') {
+      indicators = JSON.parse(signal.indicators_json);
+    }
   } catch (e) {}
 
   const handleShare = () => {

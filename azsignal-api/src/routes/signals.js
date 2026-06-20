@@ -17,11 +17,10 @@ router.get('/', authenticateToken, async (req, res) => {
     const formattedSignals = signals.map(signal => {
       let filteredSignal = { ...signal };
       
-      // Free users don't see AI reasoning or exact indicators
+      // Free users don't see AI reasoning
       if (userTier === 'free' || userTier === 'basic') {
         delete filteredSignal.ai_reasoning;
-        delete filteredSignal.indicators_json;
-        delete filteredSignal.reasons_json;
+        // removed deleting indicators_json and reasons_json so developers can see the technical analysis!
       }
       
       // Elite users only get ML features
