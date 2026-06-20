@@ -21,18 +21,4 @@ services:
       # Assuming Oracle server runs everything locally via docker bridge
       - WEBHOOK_SECRET=your_webhook_secret_here
 
-  scanner:
-    build:
-      context: .
-      dockerfile: Dockerfile.python
-    container_name: azsignal-bot
-    restart: unless-stopped
-    depends_on:
-      - api
-    environment:
-      # Map the python bot to the Node API container over the internal docker network
-      - API_BACKEND_URL=http://api:3000
-      - WEBHOOK_SECRET=your_webhook_secret_here
-      # Add Binance/Bybit API keys here
-      - BINANCE_API_KEY=
-      - BINANCE_API_SECRET=
+
