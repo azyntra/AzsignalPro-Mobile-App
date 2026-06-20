@@ -8,7 +8,7 @@ const prisma = new PrismaClient();
 
 const generateTokens = (user) => {
   const payload = { userId: user.id, email: user.email, tier: user.subscription_tier };
-  const accessToken = jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: '15m' });
+  const accessToken = jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: '30d' });
   const refreshToken = jwt.sign({ userId: user.id }, process.env.JWT_REFRESH_SECRET, { expiresIn: '30d' });
   return { accessToken, refreshToken };
 };
@@ -84,7 +84,7 @@ router.post('/refresh', async (req, res) => {
     const newAccessToken = jwt.sign(
       { userId: user.id, email: user.email, tier: user.subscription_tier },
       process.env.JWT_SECRET,
-      { expiresIn: '15m' }
+      { expiresIn: '30d' }
     );
 
     res.json({ success: true, accessToken: newAccessToken });
