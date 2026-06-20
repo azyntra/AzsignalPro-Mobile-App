@@ -152,17 +152,13 @@ async function saveAndBroadcast(signal, symbol, exchange, marketType, style, tim
 
     // Push notifications to devices
     try {
-      const expoModule = await import('expo-server-sdk');
-      const Expo = expoModule.Expo;
-      const expo = new Expo();
-
       const tokens = await prisma.deviceToken.findMany({
         where: { is_active: true }
       });
 
       let messages = [];
       for (let dt of tokens) {
-        if (!Expo.isExpoPushToken(dt.expo_push_token)) continue;
+        if (!dt.expo_push_token.startsWith('ExponentPushToken[')) continue;
         
         const emoji = signal.direction === 'LONG' ? '🟢' : '🔴';
         
@@ -175,12 +171,18 @@ async function saveAndBroadcast(signal, symbol, exchange, marketType, style, tim
         });
       }
 
-      const chunks = expo.chunkPushNotifications(messages);
-      for (let chunk of chunks) {
-        await expo.sendPushNotificationsAsync(chunk);
+      if (messages.length > 0) {
+        const axios = require('axios');
+        await axios.post('https://exp.host/--/api/v2/push/send', messages, {
+          headers: {
+            'Accept': 'application/json',
+            'Accept-encoding': 'gzip, deflate',
+            'Content-Type': 'application/json',
+          }
+        });
       }
     } catch (pushErr) {
-      console.error('Failed to send push notification:', pushErr);
+      console.error('Failed to send push notification:', pushErr.message);
     }
   } catch (error) {
     console.error('Failed to save signal:', error);

@@ -63,18 +63,13 @@ router.post('/signal', verifyWebhookSecret, async (req, res) => {
     console.log(`[Webhook] Stored new signal #${signal.id} (Bot ID: ${data.id}): ${signal.direction} ${signal.symbol}`);
 
     // Push notifications to devices
-    const expoModule = await import('expo-server-sdk');
-    const Expo = expoModule.Expo;
-    const expo = new Expo();
-
-    // Find users with active device tokens (simplified filter for now)
     const tokens = await prisma.deviceToken.findMany({
       where: { is_active: true }
     });
 
     let messages = [];
     for (let dt of tokens) {
-      if (!Expo.isExpoPushToken(dt.expo_push_token)) continue;
+      if (!dt.expo_push_token.startsWith('ExponentPushToken[')) continue;
       
       const emoji = signal.direction === 'LONG' ? '🟢' : '🔴';
       
@@ -87,12 +82,18 @@ router.post('/signal', verifyWebhookSecret, async (req, res) => {
       });
     }
 
-    const chunks = expo.chunkPushNotifications(messages);
-    for (let chunk of chunks) {
+    if (messages.length > 0) {
+      const axios = require('axios');
       try {
-        await expo.sendPushNotificationsAsync(chunk);
-      } catch (error) {
-        console.error('Error sending push chunk', error);
+        await axios.post('https://exp.host/--/api/v2/push/send', messages, {
+          headers: {
+            'Accept': 'application/json',
+            'Accept-encoding': 'gzip, deflate',
+            'Content-Type': 'application/json',
+          }
+        });
+      } catch (pushErr) {
+        console.error('Error sending push chunk', pushErr.message);
       }
     }
     
@@ -129,17 +130,13 @@ router.post('/signal-update', verifyWebhookSecret, async (req, res) => {
 
     console.log(`[Webhook Update] Signal ${signal.id} (Bot ID: ${id}) -> ${outcome} (${profit_pct}%)`);
 
-    const expoModule = await import('expo-server-sdk');
-    const Expo = expoModule.Expo;
-    const expo = new Expo();
-
     const tokens = await prisma.deviceToken.findMany({
       where: { is_active: true }
     });
 
     let messages = [];
     for (let dt of tokens) {
-      if (!Expo.isExpoPushToken(dt.expo_push_token)) continue;
+      if (!dt.expo_push_token.startsWith('ExponentPushToken[')) continue;
       
       const emoji = outcome.includes('TP') ? '✅' : (outcome === 'SL' ? '❌' : 'ℹ️');
       
@@ -152,12 +149,18 @@ router.post('/signal-update', verifyWebhookSecret, async (req, res) => {
       });
     }
 
-    const chunks = expo.chunkPushNotifications(messages);
-    for (let chunk of chunks) {
+    if (messages.length > 0) {
+      const axios = require('axios');
       try {
-        await expo.sendPushNotificationsAsync(chunk);
-      } catch (error) {
-        console.error('Error sending push chunk', error);
+        await axios.post('https://exp.host/--/api/v2/push/send', messages, {
+          headers: {
+            'Accept': 'application/json',
+            'Accept-encoding': 'gzip, deflate',
+            'Content-Type': 'application/json',
+          }
+        });
+      } catch (pushErr) {
+        console.error('Error sending push chunk', pushErr.message);
       }
     }
 
