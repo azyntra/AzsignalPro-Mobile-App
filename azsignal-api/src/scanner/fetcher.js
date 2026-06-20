@@ -1,5 +1,4 @@
 const axios = require('axios');
-const ccxt = require('ccxt');
 
 // Cache top coins
 let cachedTopCoins = [];
@@ -45,12 +44,21 @@ async function fetchTopCoins(limit = 100) {
   }
 }
 
-const exchanges = {
-  binance: new ccxt.binance({ enableRateLimit: true, options: { defaultType: 'future' } }),
-  bybit: new ccxt.bybit({ enableRateLimit: true, options: { defaultType: 'linear' } }),
-  okx: new ccxt.okx({ enableRateLimit: true, options: { defaultType: 'swap' } }),
-  kucoin: new ccxt.kucoin({ enableRateLimit: true, options: { defaultType: 'future' } }),
-};
+let exchanges = null;
+
+async function getExchanges() {
+  if (exchanges) return exchanges;
+  const ccxtModule = await import('ccxt');
+  const ccxt = ccxtModule.default || ccxtModule;
+  
+  exchanges = {
+    binance: new ccxt.binance({ enableRateLimit: true, options: { defaultType: 'future' } }),
+    bybit: new ccxt.bybit({ enableRateLimit: true, options: { defaultType: 'linear' } }),
+    okx: new ccxt.okx({ enableRateLimit: true, options: { defaultType: 'swap' } }),
+    kucoin: new ccxt.kucoin({ enableRateLimit: true, options: { defaultType: 'future' } }),
+  };
+  return exchanges;
+}
 
 // Cache loaded markets
 const marketLoaded = {
@@ -61,7 +69,8 @@ const marketLoaded = {
 };
 
 async function getExchangePairs(exchangeName) {
-  const exchange = exchanges[exchangeName];
+  const exMap = await getExchanges();
+  const exchange = exMap[exchangeName];
   if (!exchange) return [];
 
   try {
@@ -97,7 +106,8 @@ async function getExchangePairs(exchangeName) {
  * Returns an object: { '1m': [...], '5m': [...], '15m': [...] }
  */
 async function fetchMultiTimeframe(exchangeName, symbol, timeframes) {
-  const exchange = exchanges[exchangeName];
+  const exMap = await getExchanges();
+  const exchange = exMap[exchangeName];
   if (!exchange) return {};
 
   const results = {};
