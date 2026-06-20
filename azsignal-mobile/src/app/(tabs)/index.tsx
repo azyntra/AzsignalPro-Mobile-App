@@ -1,11 +1,12 @@
 import { View, Text, FlatList, TouchableOpacity, RefreshControl, ScrollView, Animated, StyleSheet, StatusBar } from 'react-native';
 import { useRouter } from 'expo-router';
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import api from '../../api';
 import { useSignalStore, Signal } from '../../store/signals';
 import { useAuthStore } from '../../store/auth';
 import { ConfidenceBar } from '../../components/ConfidenceBar';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { useFocusEffect } from 'expo-router';
 
 export default function SignalFeedScreen() {
   const { signals, setSignals, connect, disconnect } = useSignalStore();
@@ -15,6 +16,31 @@ export default function SignalFeedScreen() {
   const router = useRouter();
   
   const pulseAnim = useRef(new Animated.Value(1)).current;
+
+  // User notification preferences (loaded from backend)
+  const [userPrefs, setUserPrefs] = useState({
+    scalpSignals: true,
+    swingSignals: true,
+    shortSignals: false,
+    longSignals: true,
+    minConfidence: 70,
+  });
+
+  // Reload preferences every time the user navigates back to this tab
+  useFocusEffect(
+    useCallback(() => {
+      api.get('/preferences').then(res => {
+        setUserPrefs({
+          scalpSignals: res.data.scalpSignals ?? true,
+          swingSignals: res.data.swingSignals ?? true,
+          shortSignals: res.data.shortSignals ?? false,
+          longSignals: res.data.longSignals ?? true,
+          minConfidence: res.data.minConfidence ?? 70,
+        });
+      }).catch(() => {});
+      fetchSignals();
+    }, [])
+  );
 
   useEffect(() => {
     Animated.loop(
@@ -47,9 +73,26 @@ export default function SignalFeedScreen() {
   }, []);
 
   const filteredSignals = signals.filter(s => {
+    // Expiry check
+    const ageMs = Date.now() - new Date(s.created_at).getTime();
+    const ageHours = ageMs / (1000 * 60 * 60);
+    const isScalp = s.style?.toLowerCase() === 'scalp';
+    
+    // Scalp expires after 1 hour, Swing expires after 72 hours
+    const isExpired = isScalp ? ageHours > 1 : ageHours > 72;
+    
+    if (isExpired) return false;
+
+    // Apply user preference filters
+    if (isScalp && !userPrefs.scalpSignals) return false;
+    if (s.style?.toLowerCase() === 'swing' && !userPrefs.swingSignals) return false;
+    if (s.direction === 'SHORT' && !userPrefs.shortSignals) return false;
+    if (s.direction === 'LONG' && !userPrefs.longSignals) return false;
+    if (s.confidence < userPrefs.minConfidence) return false;
+
     if (activeFilter === 'All') return true;
-    if (activeFilter === 'Scalp') return s.style === 'scalp';
-    if (activeFilter === 'Swing') return s.style === 'swing';
+    if (activeFilter === 'Scalp') return isScalp;
+    if (activeFilter === 'Swing') return s.style?.toLowerCase() === 'swing';
     if (activeFilter === 'Long') return s.direction === 'LONG';
     if (activeFilter === 'Short') return s.direction === 'SHORT';
     return true;
@@ -59,7 +102,9 @@ export default function SignalFeedScreen() {
 
   const getTimeAgo = (dateStr: string | Date) => {
     const diff = Date.now() - new Date(dateStr).getTime();
-    const minutes = Math.max(0, Math.floor(diff / 60000));
+    const seconds = Math.max(0, Math.floor(diff / 1000));
+    if (seconds < 60) return `${seconds}s ago`;
+    const minutes = Math.floor(seconds / 60);
     if (minutes < 60) return `${minutes}m ago`;
     const hours = Math.floor(minutes / 60);
     if (hours < 24) return `${hours}h ago`;

@@ -48,11 +48,13 @@ app.get('/health', (req, res) => {
 const signalsRoutes = require('./routes/signals');
 const devicesRoutes = require('./routes/devices');
 const statsRoutes = require('./routes/stats');
+const preferencesRoutes = require('./routes/preferences');
 app.use('/api/auth', authRoutes);
 app.use('/api/webhook', webhookRoutes);
 app.use('/api/signals', signalsRoutes);
 app.use('/api/devices', devicesRoutes);
 app.use('/api/stats', statsRoutes);
+app.use('/api/preferences', preferencesRoutes);
 
 // Error handling middleware
 app.use((err, req, res, next) => {

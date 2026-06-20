@@ -2,7 +2,7 @@ import axios from 'axios';
 import { Platform } from 'react-native';
 import { getItem } from '../utils/storage';
 
-const API_URL = 'http://localhost:3001/api';
+const API_URL = 'http://130.162.189.149:3000/api';
 
 const api = axios.create({
   baseURL: API_URL,

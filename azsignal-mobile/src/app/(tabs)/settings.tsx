@@ -1,10 +1,10 @@
 import { View, Text, Switch, TouchableOpacity, ScrollView, Modal, ActivityIndicator, Alert } from 'react-native';
 import { useAuthStore } from '../../store/auth';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import Purchases, { PurchasesPackage } from 'react-native-purchases';
 import Slider from '@react-native-community/slider';
-import * as SecureStore from 'expo-secure-store';
+import api from '../../api';
 
 export default function SettingsScreen() {
   const { logout } = useAuthStore();
@@ -12,35 +12,96 @@ export default function SettingsScreen() {
   const [scalpSignals, setScalpSignals] = useState(true);
   const [swingSignals, setSwingSignals] = useState(true);
   const [shortSignals, setShortSignals] = useState(false);
+  const [longSignals, setLongSignals] = useState(true);
   const [minConfidence, setMinConfidence] = useState(75);
-  
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
+  const debounceTimer = useRef<NodeJS.Timeout | null>(null);
+
+  // Load preferences from backend on mount
   useEffect(() => {
-    SecureStore.getItemAsync('settings').then(data => {
-      if (data) {
-        const p = JSON.parse(data);
-        setAllPush(p.allPush ?? true);
-        setScalpSignals(p.scalpSignals ?? true);
-        setSwingSignals(p.swingSignals ?? true);
-        setShortSignals(p.shortSignals ?? false);
-        setMinConfidence(p.minConfidence ?? 75);
-      }
-    }).catch(console.warn);
+    loadPreferences();
   }, []);
 
-  const saveSettings = (key: string, value: any) => {
-    const p = { allPush, scalpSignals, swingSignals, shortSignals, minConfidence, [key]: value };
-    SecureStore.setItemAsync('settings', JSON.stringify(p)).catch(console.warn);
+  const loadPreferences = async () => {
+    try {
+      setIsLoading(true);
+      const response = await api.get('/preferences');
+      const prefs = response.data;
+      setAllPush(prefs.allPush ?? true);
+      setScalpSignals(prefs.scalpSignals ?? true);
+      setSwingSignals(prefs.swingSignals ?? true);
+      setShortSignals(prefs.shortSignals ?? false);
+      setLongSignals(prefs.longSignals ?? true);
+      setMinConfidence(prefs.minConfidence ?? 75);
+    } catch (error) {
+      console.warn('Failed to load preferences from server, using defaults');
+    } finally {
+      setIsLoading(false);
+    }
   };
 
-  const updateSetting = (key: string, value: any) => {
+  // Save preferences to backend (debounced for slider)
+  const savePreferences = useCallback(async (updates: Record<string, any>) => {
+    try {
+      setIsSaving(true);
+      await api.put('/preferences', updates);
+    } catch (error) {
+      console.error('Failed to save preferences:', error);
+      Alert.alert('Error', 'Failed to save your preferences. Please try again.');
+    } finally {
+      setIsSaving(false);
+    }
+  }, []);
+
+  const updateToggle = (key: string, value: boolean) => {
+    // Update local state immediately for snappy UI
     switch(key) {
       case 'allPush': setAllPush(value); break;
       case 'scalpSignals': setScalpSignals(value); break;
       case 'swingSignals': setSwingSignals(value); break;
       case 'shortSignals': setShortSignals(value); break;
-      case 'minConfidence': setMinConfidence(value); break;
+      case 'longSignals': setLongSignals(value); break;
     }
-    saveSettings(key, value);
+
+    // If master switch is turned off, disable all sub-toggles
+    if (key === 'allPush' && !value) {
+      setScalpSignals(false);
+      setSwingSignals(false);
+      setShortSignals(false);
+      setLongSignals(false);
+      savePreferences({ allPush: false });
+      return;
+    }
+
+    // If master switch is turned on, enable all sub-toggles
+    if (key === 'allPush' && value) {
+      setScalpSignals(true);
+      setSwingSignals(true);
+      setShortSignals(true);
+      setLongSignals(true);
+      savePreferences({
+        scalpSignals: true,
+        swingSignals: true,
+        shortSignals: true,
+        longSignals: true,
+      });
+      return;
+    }
+
+    // Save individual toggle to backend
+    savePreferences({ [key]: value });
+  };
+
+  const handleConfidenceChange = (value: number) => {
+    const rounded = Math.round(value);
+    setMinConfidence(rounded);
+
+    // Debounce the API call so we don't spam the server while dragging
+    if (debounceTimer.current) clearTimeout(debounceTimer.current);
+    debounceTimer.current = setTimeout(() => {
+      savePreferences({ minConfidence: rounded });
+    }, 500);
   };
 
   const [paywallVisible, setPaywallVisible] = useState(false);
@@ -87,7 +148,7 @@ export default function SettingsScreen() {
       <Text className="text-gray-400 font-semibold mb-4 uppercase text-xs tracking-wider">Notifications</Text>
       
       {/* Notifications Section */}
-      <View className="mb-8">
+      <View className="mb-8" style={{ opacity: isLoading ? 0.5 : 1 }}>
         <View className="flex-row justify-between items-center mb-6">
           <View>
             <Text className="text-white font-semibold text-base mb-1">All push notifications</Text>
@@ -95,56 +156,61 @@ export default function SettingsScreen() {
           </View>
           <Switch 
             value={allPush} 
-            onValueChange={(val) => updateSetting('allPush', val)}
+            onValueChange={(val) => updateToggle('allPush', val)}
             trackColor={{ false: '#333', true: '#16C784' }}
             thumbColor="#fff"
+            disabled={isLoading}
           />
         </View>
 
-        <View className="flex-row justify-between items-center mb-6">
+        <View className="flex-row justify-between items-center mb-6" style={{ opacity: allPush ? 1 : 0.4 }}>
           <View>
             <Text className="text-white font-semibold text-base mb-1">Scalp signals</Text>
             <Text className="text-gray-500 text-xs">1m/5m/15m timeframes</Text>
           </View>
           <Switch 
             value={scalpSignals} 
-            onValueChange={(val) => updateSetting('scalpSignals', val)}
+            onValueChange={(val) => updateToggle('scalpSignals', val)}
             trackColor={{ false: '#333', true: '#16C784' }}
             thumbColor="#fff"
+            disabled={!allPush || isLoading}
           />
         </View>
 
-        <View className="flex-row justify-between items-center mb-6">
+        <View className="flex-row justify-between items-center mb-6" style={{ opacity: allPush ? 1 : 0.4 }}>
           <View>
             <Text className="text-white font-semibold text-base mb-1">Swing signals</Text>
             <Text className="text-gray-500 text-xs">1h/4h/1d timeframes</Text>
           </View>
           <Switch 
             value={swingSignals} 
-            onValueChange={(val) => updateSetting('swingSignals', val)}
+            onValueChange={(val) => updateToggle('swingSignals', val)}
             trackColor={{ false: '#333', true: '#16C784' }}
             thumbColor="#fff"
+            disabled={!allPush || isLoading}
           />
         </View>
 
-        <View className="flex-row justify-between items-center mb-6">
+        <View className="flex-row justify-between items-center mb-6" style={{ opacity: allPush ? 1 : 0.4 }}>
           <View>
             <Text className="text-white font-semibold text-base mb-1">Short signals</Text>
             <Text className="text-gray-500 text-xs">Bearish trades only</Text>
           </View>
           <Switch 
             value={shortSignals} 
-            onValueChange={(val) => updateSetting('shortSignals', val)}
+            onValueChange={(val) => updateToggle('shortSignals', val)}
             trackColor={{ false: '#333', true: '#16C784' }}
             thumbColor="#fff"
+            disabled={!allPush || isLoading}
           />
         </View>
 
         {/* Min Confidence Slider */}
-        <View className="mt-2 mb-2">
+        <View className="mt-2 mb-2" style={{ opacity: allPush ? 1 : 0.4 }}>
           <View className="flex-row items-center mb-2">
             <Text className="text-white font-semibold text-base">Min confidence: </Text>
             <Text className="text-[#F5B300] font-bold text-base">{minConfidence}%</Text>
+            {isSaving && <ActivityIndicator size="small" color="#16C784" style={{ marginLeft: 8 }} />}
           </View>
           <Slider
             style={{ width: '100%', height: 40 }}
@@ -152,10 +218,11 @@ export default function SettingsScreen() {
             maximumValue={95}
             step={1}
             value={minConfidence}
-            onValueChange={(val) => updateSetting('minConfidence', val)}
+            onValueChange={handleConfidenceChange}
             minimumTrackTintColor="#F5B300"
             maximumTrackTintColor="#333"
             thumbTintColor="#F5B300"
+            disabled={!allPush || isLoading}
           />
           <View className="flex-row justify-between px-1">
             <Text className="text-gray-500 text-xs font-semibold">70%</Text>

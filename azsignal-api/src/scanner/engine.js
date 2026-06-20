@@ -150,18 +150,60 @@ async function saveAndBroadcast(signal, symbol, exchange, marketType, style, tim
     console.log(`✅ [${style.toUpperCase()}] ${symbol} ${signal.direction} CONF=${signal.confidence}%`);
     broadcastSignal(record);
 
-    // Push notifications to devices
+    // Push notifications to devices (respecting user preferences)
     try {
       const tokens = await prisma.deviceToken.findMany({
-        where: { is_active: true }
+        where: { is_active: true },
+        include: {
+          user: {
+            include: {
+              notification_prefs: true
+            }
+          }
+        }
       });
 
       let messages = [];
       for (let dt of tokens) {
         if (!dt.expo_push_token.startsWith('ExponentPushToken[')) continue;
-        
+
+        // Check user notification preferences
+        const prefs = dt.user?.notification_prefs;
+        if (prefs) {
+          // Check style preferences
+          if (style === 'scalp' && !prefs.enable_scalp) continue;
+          if (style === 'swing' && !prefs.enable_swing) continue;
+
+          // Check direction preferences
+          if (signal.direction === 'LONG' && !prefs.enable_long) continue;
+          if (signal.direction === 'SHORT' && !prefs.enable_short) continue;
+
+          // Check minimum confidence
+          if (signal.confidence < prefs.min_confidence) continue;
+
+          // Check exchange filter
+          try {
+            const allowedExchanges = JSON.parse(prefs.exchanges || '[]');
+            if (allowedExchanges.length > 0 && !allowedExchanges.includes(exchange)) continue;
+          } catch (e) { /* ignore parse errors */ }
+
+          // Check quiet hours
+          if (prefs.quiet_hours_start && prefs.quiet_hours_end) {
+            const now = new Date();
+            const currentHHMM = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+            const start = prefs.quiet_hours_start;
+            const end = prefs.quiet_hours_end;
+            // Handle overnight quiet hours (e.g. 22:00 to 07:00)
+            if (start > end) {
+              if (currentHHMM >= start || currentHHMM < end) continue;
+            } else {
+              if (currentHHMM >= start && currentHHMM < end) continue;
+            }
+          }
+        }
+
         const emoji = signal.direction === 'LONG' ? '🟢' : '🔴';
-        
+
         messages.push({
           to: dt.expo_push_token,
           sound: 'default',
