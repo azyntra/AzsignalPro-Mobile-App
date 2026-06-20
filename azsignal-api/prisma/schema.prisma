@@ -10,7 +10,9 @@ datasource db {
 model User {
   id                  Int       @id @default(autoincrement())
   email               String    @unique
-  password_hash       String
+  password_hash       String?
+  auth_provider       String    @default("local") // 'local', 'google'
+  provider_id         String?   @unique
   name                String?
   subscription_tier   String    @default("free") // 'free','basic','pro','elite'
   subscription_expiry DateTime?
