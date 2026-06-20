@@ -27,8 +27,12 @@ async function fetchTopCoins(limit = 100) {
     });
     
     // Convert symbols to uppercase (e.g., 'BTC', 'ETH')
-    const symbols = response.data.map(coin => coin.symbol.toUpperCase());
+    let symbols = response.data.map(coin => coin.symbol.toUpperCase());
     
+    // Filter out common stablecoins and fiat-pegged tokens
+    const stablecoins = ['USDT', 'USDC', 'FDUSD', 'DAI', 'USDD', 'USDE', 'PYUSD', 'TUSD', 'USD1', 'USDB', 'BUSD'];
+    symbols = symbols.filter(sym => !stablecoins.includes(sym));
+
     // Always include a few majors just in case
     if (!symbols.includes('BTC')) symbols.push('BTC');
     if (!symbols.includes('ETH')) symbols.push('ETH');

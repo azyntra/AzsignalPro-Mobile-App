@@ -64,7 +64,7 @@ function validateAndBuild(rawResult, marketType, style) {
   const rrRatio = (Math.abs(entry - tp2) / Math.abs(entry - stopLoss));
 
   // Validation 3: R:R ratio
-  if (rrRatio < MIN_RR_RATIO) return null;
+  if (isNaN(rrRatio) || !isFinite(rrRatio) || rrRatio < MIN_RR_RATIO) return null;
 
   const riskPct = (Math.abs(entry - stopLoss) / entry) * 100;
   const tp1Pct = (Math.abs(entry - tp1) / entry) * 100;
