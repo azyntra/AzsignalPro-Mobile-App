@@ -11,17 +11,26 @@ export default function TabLayout() {
   const user = useAuthStore(state => state.user);
 
   useEffect(() => {
-    // API keys should ideally come from environment variables.
-    // Using placeholders for now until configured in the RevenueCat dashboard.
     if (Platform.OS !== 'web') {
-      if (Platform.OS === 'ios') {
-        Purchases.configure({ apiKey: process.env.EXPO_PUBLIC_REVENUECAT_APPLE_KEY || 'appl_api_key' });
-      } else if (Platform.OS === 'android') {
-        Purchases.configure({ apiKey: process.env.EXPO_PUBLIC_REVENUECAT_GOOGLE_KEY || 'goog_api_key' });
-      }
+      try {
+        if (Platform.OS === 'ios' && process.env.EXPO_PUBLIC_REVENUECAT_APPLE_KEY) {
+          Purchases.configure({ apiKey: process.env.EXPO_PUBLIC_REVENUECAT_APPLE_KEY });
+        } else if (Platform.OS === 'android' && process.env.EXPO_PUBLIC_REVENUECAT_GOOGLE_KEY) {
+          Purchases.configure({ apiKey: process.env.EXPO_PUBLIC_REVENUECAT_GOOGLE_KEY });
+        }
 
-      if (user?.id) {
-        Purchases.logIn(user.id.toString());
+        if (user?.id) {
+          // Purchases.logIn is async and must have errors caught if unconfigured
+          (async () => {
+            try {
+              await Purchases.logIn(user.id.toString());
+            } catch (e) {
+              console.log('RevenueCat logIn skipped (Simulator/Expo Go):', e);
+            }
+          })();
+        }
+      } catch (e) {
+        console.warn('RevenueCat initialization skipped in Expo Go:', e);
       }
     }
   }, [user]);
