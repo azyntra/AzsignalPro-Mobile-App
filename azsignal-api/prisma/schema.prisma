@@ -22,6 +22,7 @@ model User {
 
   device_tokens       DeviceToken[]
   notification_prefs  NotificationPreference?
+  password_reset_tokens PasswordResetToken[]
 }
 
 model DeviceToken {
@@ -88,4 +89,14 @@ model Signal {
   telegram_msg_id     Int?
   created_at          DateTime  @default(now())
   closed_at           DateTime?
+}
+
+model PasswordResetToken {
+  id         Int      @id @default(autoincrement())
+  user_id    Int
+  token      String   @unique
+  expires_at DateTime
+  created_at DateTime @default(now())
+
+  user       User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
 }

@@ -2,17 +2,14 @@ import axios from 'axios';
 import { Platform } from 'react-native';
 import { getItem } from '../utils/storage';
 
-// For local testing on emulator/simulator:
-// iOS Simulator uses localhost
-// Android Emulator uses 10.0.2.2
-const localApiUrl = Platform.OS === 'android' ? 'http://10.0.2.2:3000/api' : 'http://localhost:3000/api';
-const API_URL = process.env.EXPO_PUBLIC_API_URL || localApiUrl;
+const API_URL = 'http://localhost:3001/api';
 
 const api = axios.create({
   baseURL: API_URL,
 });
 
 api.interceptors.request.use(async (config) => {
+  console.log('[AXIOS REQUEST]', config.method?.toUpperCase(), config.baseURL, config.url);
   const token = await getItem('jwt_token');
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
@@ -23,6 +20,10 @@ api.interceptors.request.use(async (config) => {
 api.interceptors.response.use(
   (response) => response,
   (error) => {
+    console.log('[AXIOS ERROR]', error.message, 'URL:', error.config?.baseURL, error.config?.url);
+    if (error.toJSON) {
+      console.log('[AXIOS ERROR JSON]', JSON.stringify(error.toJSON(), null, 2));
+    }
     if (error.response && (error.response.status === 401 || error.response.status === 403)) {
       // Import store here to avoid circular dependency issues
       const { useAuthStore } = require('../store/auth');

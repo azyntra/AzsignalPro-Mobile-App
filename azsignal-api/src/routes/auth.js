@@ -169,6 +169,72 @@ router.post('/refresh', async (req, res) => {
 
     res.json({ success: true, accessToken: newAccessToken });
   });
+router.post('/forgot-password', async (req, res) => {
+  const { email } = req.body;
+  if (!email) return res.status(400).json({ success: false, message: 'Email is required' });
+
+  const user = await prisma.user.findUnique({ where: { email } });
+  if (!user) {
+    // For security, don't reveal if user exists or not
+    return res.json({ success: true, message: 'If an account exists, a reset code was sent' });
+  }
+
+  // Generate a random 6-digit OTP
+  const otp = Math.floor(100000 + Math.random() * 900000).toString();
+
+  // Expire in 15 minutes
+  const expiresAt = new Date(Date.now() + 15 * 60 * 1000);
+
+  // Invalidate any existing tokens for this user
+  await prisma.passwordResetToken.deleteMany({ where: { user_id: user.id } });
+
+  await prisma.passwordResetToken.create({
+    data: {
+      user_id: user.id,
+      token: otp,
+      expires_at: expiresAt,
+    }
+  });
+
+  // Since we don't have an SMTP provider, we will log it to the console
+  console.log(`\n======================================`);
+  console.log(`[DEVELOPMENT ONLY]`);
+  console.log(`Password reset OTP for ${email} is: ${otp}`);
+  console.log(`======================================\n`);
+
+  res.json({ success: true, message: 'A password reset code has been generated. Check the server logs (or email).' });
+});
+
+router.post('/reset-password', async (req, res) => {
+  const { token, newPassword } = req.body;
+  if (!token || !newPassword) {
+    return res.status(400).json({ success: false, message: 'Token and new password are required' });
+  }
+
+  const resetToken = await prisma.passwordResetToken.findUnique({ where: { token } });
+  
+  if (!resetToken) {
+    return res.status(400).json({ success: false, message: 'Invalid or expired reset code' });
+  }
+
+  if (resetToken.expires_at < new Date()) {
+    await prisma.passwordResetToken.delete({ where: { id: resetToken.id } });
+    return res.status(400).json({ success: false, message: 'Reset code has expired' });
+  }
+
+  // Hash the new password
+  const password_hash = await bcrypt.hash(newPassword, 10);
+
+  // Update user's password
+  await prisma.user.update({
+    where: { id: resetToken.user_id },
+    data: { password_hash, auth_provider: 'local' }
+  });
+
+  // Delete the used token
+  await prisma.passwordResetToken.delete({ where: { id: resetToken.id } });
+
+  res.json({ success: true, message: 'Password has been successfully reset. You can now login.' });
 });
 
 module.exports = router;
