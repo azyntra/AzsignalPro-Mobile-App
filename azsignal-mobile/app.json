@@ -36,11 +36,23 @@
             "imageWidth": 76
           }
         }
+      ],
+      [
+        "@react-native-google-signin/google-signin",
+        {
+          "iosUrlScheme": "com.googleusercontent.apps.317472937887-r18lnai6drcbaog5la2aq86uk4j4qqm0"
+        }
       ]
     ],
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "17137033-3c4a-4900-9180-01c7c189b317"
+      }
     }
   }
 }
