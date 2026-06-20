@@ -24,36 +24,40 @@ router.post('/signal', verifyWebhookSecret, async (req, res) => {
     const entryPrice = data.price_at_signal || data.entry_low || 1;
     const calcPct = (val) => val ? Math.abs((val - entryPrice) / entryPrice) * 100 : 0;
 
-    const signal = await prisma.signal.create({
-      data: {
-        bot_signal_id: data.id,
-        symbol: data.symbol,
-        exchange: data.exchange,
-        market_type: data.market_type,
-        style: data.style,
-        timeframe: data.timeframe,
-        direction: data.direction,
-        confidence: data.confidence,
-        entry_low: data.entry_low,
-        entry_high: data.entry_high,
-        tp1: data.tp1,
-        tp2: data.tp2,
-        tp3: data.tp3,
-        tp1_pct: data.tp1_pct || calcPct(data.tp1),
-        tp2_pct: data.tp2_pct || calcPct(data.tp2),
-        tp3_pct: data.tp3_pct || calcPct(data.tp3),
-        stop_loss: data.stop_loss,
-        risk_pct: data.risk_pct || calcPct(data.stop_loss),
-        rr_ratio: data.rr_ratio,
-        leverage: data.leverage,
-        price_at_signal: data.price_at_signal,
-        reasons_json,
-        indicators_json,
-        ai_decision: data.ai_decision,
-        ai_adjusted_conf: data.ai_adjusted_confidence,
-        ai_reasoning: data.ai_reasoning,
-        created_at: data.created_at ? new Date(data.created_at) : new Date(),
-      }
+    const signalData = {
+      bot_signal_id: data.id,
+      symbol: data.symbol,
+      exchange: data.exchange,
+      market_type: data.market_type,
+      style: data.style,
+      timeframe: data.timeframe,
+      direction: data.direction,
+      confidence: data.confidence,
+      entry_low: data.entry_low,
+      entry_high: data.entry_high,
+      tp1: data.tp1,
+      tp2: data.tp2,
+      tp3: data.tp3,
+      tp1_pct: data.tp1_pct || calcPct(data.tp1),
+      tp2_pct: data.tp2_pct || calcPct(data.tp2),
+      tp3_pct: data.tp3_pct || calcPct(data.tp3),
+      stop_loss: data.stop_loss,
+      risk_pct: data.risk_pct || calcPct(data.stop_loss),
+      rr_ratio: data.rr_ratio,
+      leverage: data.leverage,
+      price_at_signal: data.price_at_signal,
+      reasons_json,
+      indicators_json,
+      ai_decision: data.ai_decision,
+      ai_adjusted_conf: data.ai_adjusted_confidence,
+      ai_reasoning: data.ai_reasoning,
+      created_at: data.created_at ? new Date(data.created_at) : new Date(),
+    };
+
+    const signal = await prisma.signal.upsert({
+      where: { bot_signal_id: data.id },
+      update: signalData,
+      create: signalData,
     });
 
     console.log(`[Webhook] Stored new signal #${signal.id} (Bot ID: ${data.id}): ${signal.direction} ${signal.symbol}`);
