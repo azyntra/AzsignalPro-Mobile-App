@@ -1,0 +1,1098 @@
+================================================================================
+  AZSIGNAL PRO — MOBILE APP IMPLEMENTATION PLAN
+  Prepared for: Antigravity Development Team
+  Product: AzSignal Pro (by Azyntra Technologies)
+  Platform: Android + iOS (React Native / Expo)
+  Version: 1.0
+================================================================================
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 1 — PROJECT OVERVIEW
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+AzSignal Pro is a cryptocurrency trading signal platform. A Python bot already
+runs live on an Oracle Cloud Infrastructure (OCI) Ubuntu server. It scans the
+top-100 coins by market cap across Binance, Bybit, OKX, and KuCoin, applies
+technical analysis (RSI, MACD, EMA, Bollinger Bands, ADX, ATR, Stochastic,
+OBV), passes candidates through a Gemini AI filter, and delivers high-confidence
+signals to a Telegram channel.
+
+The objective of this project is to build a mobile app for Android and iOS that:
+  - Delivers trading signals as real-time push notifications
+  - Displays a live signal feed with full detail (entry, TP1/TP2/TP3, SL)
+  - Shows performance statistics (win rate, R:R, P&L)
+  - Supports subscription-based access tiers
+  - Connects to a new API backend that bridges the existing bot to the mobile app
+
+The existing bot must NOT be modified except for one small addition:
+a webhook call that fires after each signal is delivered to Telegram.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 2 — OVERALL ARCHITECTURE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Layer 1 — Existing Bot (OCI Ubuntu, unchanged except webhook)
+  Python bot running under systemd
+  Generates signals → sends to Telegram channel
+  NEW: also fires HTTP POST to API backend on every confirmed signal
+
+Layer 2 — API Backend (new, same OCI instance)
+  Node.js + Express application
+  Managed by PM2 alongside the existing bot
+  Port: 3000
+  Responsibilities:
+    - Receive signal webhook from the bot
+    - Store signals + users + device tokens in MySQL
+    - Expose REST API for the mobile app
+    - Maintain WebSocket connections for live signal streaming
+    - Send push notifications via Expo Push API (FCM + APNs)
+    - Enforce subscription tier access rules
+    - Handle user authentication via JWT
+
+Layer 3 — Push Notification Services (cloud, no server needed)
+  Expo Push Notification API (https://exp.host/--/api/v2/push/send)
+    This single API handles delivery to both FCM (Android) and APNs (iOS)
+    The API backend calls this endpoint when a new signal arrives
+
+Layer 4 — Mobile App (React Native + Expo)
+  Single codebase for both Android and iOS
+  Screens: Signal Feed, Signal Detail, Performance, Settings, Auth
+  Handles foreground and background push notifications
+  Registers Expo push tokens with the API backend on login
+
+Layer 5 — Distribution
+  Android: Google Play Store (Play Console, .aab build)
+  iOS: Apple App Store (App Store Connect, TestFlight for beta)
+
+Layer 6 — Monetization
+  RevenueCat SDK (single integration for Google Play Billing + Apple IAP)
+  API backend verifies subscription status via RevenueCat webhook
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 3 — SIGNAL DATA MODEL
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+The existing bot stores signals in SQLite with the following schema.
+The API backend must mirror this structure in MySQL.
+
+Table: signals
+  id                      INTEGER PRIMARY KEY
+  symbol                  VARCHAR   e.g. "BTC/USDT"
+  exchange                VARCHAR   e.g. "okx", "bybit", "binance", "kucoin"
+  market_type             VARCHAR   "spot" or "futures"
+  style                   VARCHAR   "scalp" or "swing"
+  timeframe               VARCHAR   e.g. "5m", "1h", "4h"
+  direction               VARCHAR   "LONG" or "SHORT"
+  confidence              FLOAT     percentage e.g. 82.0
+  entry_low               FLOAT
+  entry_high              FLOAT
+  tp1                     FLOAT
+  tp2                     FLOAT
+  tp3                     FLOAT
+  tp1_pct                 FLOAT     percentage gain at TP1
+  tp2_pct                 FLOAT     percentage gain at TP2
+  tp3_pct                 FLOAT     percentage gain at TP3
+  stop_loss               FLOAT
+  risk_pct                FLOAT     percentage loss at SL
+  rr_ratio                FLOAT     e.g. 2.8
+  leverage                VARCHAR   e.g. "5-10x" or "1x (spot)"
+  price_at_signal         FLOAT
+  price_at_close          FLOAT     nullable
+  outcome                 VARCHAR   NULL / "TP1" / "TP2" / "TP3" / "SL" / "EXPIRED"
+  profit_pct              FLOAT     nullable
+  reasons_json            TEXT      JSON array of indicator reason strings
+  indicators_json         TEXT      JSON object (rsi, adx, vol_ratio, above_200, etc.)
+  ai_decision             VARCHAR   "APPROVE" / "REJECT" / "HOLD"
+  ai_adjusted_confidence  INTEGER   nullable
+  ai_reasoning            TEXT      nullable
+  sent_to_telegram        BOOLEAN
+  telegram_msg_id         INTEGER   nullable
+  created_at              DATETIME
+  closed_at               DATETIME  nullable
+
+Reasons array example:
+  ["EMA 9>21>50 bull alignment", "MACD bullish crossover", "ADX trending bull (28)", "OBV rising — accumulation"]
+
+Indicators object example:
+  {"rsi": 52.4, "adx": 28, "vol_ratio": 1.8, "above_200": true, "ema200": 65000}
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 4 — DATABASE SCHEMA (MySQL — API Backend)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Table: users
+  id                  INT           PRIMARY KEY AUTO_INCREMENT
+  email               VARCHAR(255)  UNIQUE NOT NULL
+  password_hash       VARCHAR(255)  NOT NULL
+  name                VARCHAR(100)
+  subscription_tier   ENUM('free','basic','pro','elite')  DEFAULT 'free'
+  subscription_expiry DATETIME      nullable
+  revenuecat_user_id  VARCHAR(100)  nullable
+  created_at          DATETIME
+  updated_at          DATETIME
+
+Table: device_tokens
+  id                  INT           PRIMARY KEY AUTO_INCREMENT
+  user_id             INT           FOREIGN KEY → users.id
+  expo_push_token     VARCHAR(200)  NOT NULL
+  platform            ENUM('ios','android')
+  is_active           BOOLEAN       DEFAULT TRUE
+  created_at          DATETIME
+  updated_at          DATETIME
+
+Table: signals
+  (Mirror of bot SQLite schema above, using MySQL types)
+  id                  INT           PRIMARY KEY AUTO_INCREMENT
+  symbol              VARCHAR(20)
+  exchange            VARCHAR(20)
+  market_type         ENUM('spot','futures')
+  style               ENUM('scalp','swing')
+  timeframe           VARCHAR(5)
+  direction           ENUM('LONG','SHORT')
+  confidence          DECIMAL(5,2)
+  entry_low           DECIMAL(20,8)
+  entry_high          DECIMAL(20,8)
+  tp1                 DECIMAL(20,8)
+  tp2                 DECIMAL(20,8)
+  tp3                 DECIMAL(20,8)
+  tp1_pct             DECIMAL(6,3)
+  tp2_pct             DECIMAL(6,3)
+  tp3_pct             DECIMAL(6,3)
+  stop_loss           DECIMAL(20,8)
+  risk_pct            DECIMAL(6,3)
+  rr_ratio            DECIMAL(6,3)
+  leverage            VARCHAR(20)
+  price_at_signal     DECIMAL(20,8)
+  price_at_close      DECIMAL(20,8)  nullable
+  outcome             ENUM('TP1','TP2','TP3','SL','EXPIRED')  nullable
+  profit_pct          DECIMAL(8,3)   nullable
+  reasons_json        JSON
+  indicators_json     JSON
+  ai_decision         VARCHAR(10)    nullable
+  ai_adjusted_confidence INT         nullable
+  ai_reasoning        TEXT           nullable
+  created_at          DATETIME
+  closed_at           DATETIME       nullable
+
+Table: notification_preferences
+  id                  INT           PRIMARY KEY AUTO_INCREMENT
+  user_id             INT           FOREIGN KEY → users.id
+  enable_scalp        BOOLEAN       DEFAULT TRUE
+  enable_swing        BOOLEAN       DEFAULT TRUE
+  enable_long         BOOLEAN       DEFAULT TRUE
+  enable_short        BOOLEAN       DEFAULT TRUE
+  min_confidence      INT           DEFAULT 70
+  exchanges           JSON          e.g. ["okx","bybit","binance","kucoin"]
+  quiet_hours_start   TIME          nullable  e.g. "22:00"
+  quiet_hours_end     TIME          nullable  e.g. "07:00"
+  created_at          DATETIME
+  updated_at          DATETIME
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 5 — API BACKEND SPECIFICATION (Node.js / Express)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+5.1 Tech Stack
+--------------
+  Runtime:      Node.js 20 LTS
+  Framework:    Express 4
+  Database:     MySQL 8 via mysql2
+  ORM:          Prisma (or Sequelize)
+  Auth:         jsonwebtoken + bcrypt
+  WebSocket:    ws library
+  Process mgr:  PM2
+  Port:         3000
+  Environment:  .env file
+
+5.2 Environment Variables
+--------------------------
+  DATABASE_URL          MySQL connection string
+  JWT_SECRET            Random 64-char string
+  JWT_REFRESH_SECRET    Random 64-char string
+  WEBHOOK_SECRET        Shared secret with the bot (for webhook auth)
+  EXPO_ACCESS_TOKEN     From expo.dev account (optional but recommended)
+  REVENUECAT_API_KEY    From RevenueCat dashboard
+  PORT                  3000
+
+5.3 REST API Endpoints
+-----------------------
+
+AUTH
+  POST   /api/auth/register
+    Body: { email, password, name }
+    Response: { user, accessToken, refreshToken }
+
+  POST   /api/auth/login
+    Body: { email, password }
+    Response: { user, accessToken, refreshToken }
+
+  POST   /api/auth/refresh
+    Body: { refreshToken }
+    Response: { accessToken }
+
+  POST   /api/auth/logout
+    Header: Authorization: Bearer <token>
+    Body: { refreshToken }
+
+DEVICE TOKENS
+  POST   /api/devices/register
+    Header: Authorization: Bearer <token>
+    Body: { expoPushToken, platform }
+    Response: { success: true }
+
+  DELETE /api/devices/unregister
+    Header: Authorization: Bearer <token>
+    Body: { expoPushToken }
+
+SIGNALS
+  GET    /api/signals
+    Header: Authorization: Bearer <token>
+    Query params:
+      page        (default 1)
+      limit       (default 20, max 50)
+      style       "scalp" | "swing" | "all"
+      direction   "LONG" | "SHORT" | "all"
+      exchange    "okx" | "bybit" | "binance" | "kucoin" | "all"
+      outcome     "open" | "closed" | "all"
+      from        ISO date string
+      to          ISO date string
+    Response: { signals: [...], total, page, pages }
+
+  GET    /api/signals/:id
+    Header: Authorization: Bearer <token>
+    Response: { signal }
+
+PERFORMANCE / STATS
+  GET    /api/stats/summary
+    Header: Authorization: Bearer <token>
+    Query: days (default 7)
+    Response:
+      {
+        days, total, wins, losses, open, expired,
+        win_rate, avg_profit_pct, avg_loss_pct, total_pnl,
+        by_style: { scalp: {...}, swing: {...} },
+        by_exchange: { okx: {...}, bybit: {...}, ... },
+        by_direction: { LONG: {...}, SHORT: {...} },
+        by_tp_level: { TP1: N, TP2: N, TP3: N, SL: N },
+        best_signal: { symbol, profit_pct, ... },
+        worst_signal: { symbol, profit_pct, ... }
+      }
+
+  GET    /api/stats/chart
+    Header: Authorization: Bearer <token>
+    Query: days (default 30), interval "day" | "week"
+    Response: { data: [ { date, win_rate, total_signals, cumulative_pnl } ] }
+
+NOTIFICATION PREFERENCES
+  GET    /api/preferences
+    Header: Authorization: Bearer <token>
+    Response: { preferences }
+
+  PUT    /api/preferences
+    Header: Authorization: Bearer <token>
+    Body: { enable_scalp, enable_swing, enable_long, enable_short,
+            min_confidence, exchanges, quiet_hours_start, quiet_hours_end }
+
+USER PROFILE
+  GET    /api/user/profile
+    Header: Authorization: Bearer <token>
+    Response: { user, subscription }
+
+WEBHOOK (called by the Python bot — not by the mobile app)
+  POST   /api/webhook/signal
+    Header: X-Webhook-Secret: <WEBHOOK_SECRET>
+    Body:
+      {
+        id, symbol, exchange, market_type, style, timeframe, direction,
+        confidence, entry_low, entry_high,
+        tp1, tp2, tp3, tp1_pct, tp2_pct, tp3_pct,
+        stop_loss, risk_pct, rr_ratio, leverage,
+        price_at_signal, reasons, indicators,
+        ai_decision, ai_adjusted_confidence, ai_reasoning,
+        created_at
+      }
+    Action:
+      1. Validate WEBHOOK_SECRET header
+      2. Insert signal into MySQL signals table
+      3. Query all active device tokens where user preferences match this signal
+      4. Send push notification batch to Expo Push API
+      5. Broadcast to all connected WebSocket clients
+    Response: { received: true }
+
+5.4 WebSocket Events
+---------------------
+  URL: ws://your-server:3000/ws?token=<JWT>
+
+  Server → Client events:
+    signal.new
+      Payload: full signal object (same as /api/signals/:id response)
+      Sent when: bot webhook fires a new signal
+
+    signal.update
+      Payload: { id, outcome, profit_pct, closed_at }
+      Sent when: bot closes a signal (TP hit / SL hit)
+
+    ping
+      Sent every 30 seconds (client must respond with pong)
+
+  Client → Server:
+    pong
+      Keepalive response
+
+5.5 Push Notification Logic
+----------------------------
+  When a webhook signal arrives, the backend must:
+
+  1. Load all users with active device tokens
+  2. For each user, check their notification_preferences:
+     - enable_scalp / enable_swing matches signal.style
+     - enable_long / enable_short matches signal.direction
+     - min_confidence <= signal.confidence
+     - signal.exchange is in user's exchanges list
+     - current UTC time is NOT within quiet_hours window
+  3. Check subscription tier:
+     - free: only first 3 signals per day (count from signals table)
+     - basic: all signals
+     - pro: all signals + AI reasoning included
+     - elite: all signals + AI reasoning + ML win probability
+  4. Build Expo push message:
+     {
+       to: <expo_push_token>,
+       title: "<DIRECTION_EMOJI> <DIRECTION> <SYMBOL>",
+       body: "<STYLE> | <EXCHANGE> | Confidence: <CONFIDENCE>% | R:R 1:<RR_RATIO>",
+       data: { signalId: <id> },
+       sound: "default",
+       badge: 1,
+       priority: "high"
+     }
+  5. Send to https://exp.host/--/api/v2/push/send in batches of 100
+
+  Example push title: "🟢 LONG BTC/USDT"
+  Example push body:  "SWING | OKX | Confidence: 82% | R:R 1:2.8"
+
+5.6 Signal Outcome Updates from Bot
+-------------------------------------
+  When the bot closes a signal (TP hit or SL hit), it fires another webhook:
+
+  POST /api/webhook/signal-update
+    Header: X-Webhook-Secret: <WEBHOOK_SECRET>
+    Body: { id, outcome, profit_pct, price_at_close, closed_at }
+    Action:
+      1. Update signal record in MySQL
+      2. Broadcast signal.update event to connected WebSocket clients
+      3. Send push notification: "✅ BTC/USDT TP2 hit +3.5%" or "❌ ETH/USDT SL hit -2.0%"
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 6 — PYTHON BOT MODIFICATION (minimal)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+File: src/delivery/telegram_bot.py
+
+After the signal is sent to Telegram, add a call to fire_signal_webhook().
+This function sends the signal payload to the API backend.
+
+Pseudocode addition:
+
+  async def fire_signal_webhook(signal_data: dict):
+      import aiohttp, os
+      url = os.getenv("API_BACKEND_URL", "http://localhost:3000") + "/api/webhook/signal"
+      secret = os.getenv("WEBHOOK_SECRET")
+      try:
+          async with aiohttp.ClientSession() as session:
+              await session.post(url, json=signal_data, headers={"X-Webhook-Secret": secret}, timeout=5)
+      except Exception as e:
+          logger.warning(f"Webhook fire failed: {e}")  # non-fatal
+
+Also add to .env:
+  API_BACKEND_URL=http://localhost:3000
+  WEBHOOK_SECRET=<same value as API backend .env>
+
+The signal_data payload should match the webhook body defined in Section 5.3.
+The bot's existing SQLite SignalRecord fields contain all required data.
+
+For outcome updates (TP/SL hit), the existing outcome_tracker.py should also
+call fire_signal_update_webhook() with the signal id, outcome, and profit_pct.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 7 — MOBILE APP SPECIFICATION (React Native + Expo)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+7.1 Tech Stack
+--------------
+  Framework:        React Native with Expo SDK 51+
+  Navigation:       Expo Router (file-based) or React Navigation v6
+  State:            Zustand (lightweight) or Redux Toolkit
+  Data fetching:    TanStack Query (React Query)
+  HTTP client:      Axios
+  WebSocket:        React Native built-in WebSocket
+  Push:             expo-notifications
+  Auth storage:     expo-secure-store
+  Charts:           Victory Native or react-native-gifted-charts
+  UI components:    React Native Paper or NativeWind (Tailwind)
+  Payments:         react-native-purchases (RevenueCat SDK)
+  Icons:            @expo/vector-icons
+
+7.2 App Screens and Navigation
+-------------------------------
+
+  Auth Stack (not authenticated):
+    /login           Login screen (email + password)
+    /register        Registration screen
+    /forgot-password Password reset (email OTP)
+
+  Main Tab Navigator (authenticated):
+    Tab 1: Signals   → Signal Feed screen
+    Tab 2: Stats     → Performance screen
+    Tab 3: Settings  → Settings screen
+
+  Modal / Stack screens:
+    /signals/:id     Signal Detail screen (pushed from feed)
+
+7.3 Screen Specifications
+--------------------------
+
+SCREEN: Login
+  Elements:
+    - AzSignal Pro logo + tagline
+    - Email input field
+    - Password input field (masked)
+    - Login button
+    - "Forgot password?" link
+    - "Don't have an account? Register" link
+  Behavior:
+    - On success: store accessToken + refreshToken in SecureStore, navigate to main
+    - On failure: show inline error message
+    - Auto-login if valid tokens exist in SecureStore on app start
+
+SCREEN: Register
+  Elements:
+    - Name, Email, Password, Confirm Password inputs
+    - Register button
+    - "Already have an account? Login" link
+  Behavior:
+    - On success: same as login (tokens returned), navigate to main
+    - Show password strength indicator
+
+SCREEN: Signal Feed (main screen)
+  Header:
+    - App name "AzSignal Pro" left, notification bell icon right
+    - Filter bar below header: ALL | SCALP | SWING filter pills
+    - Second filter row: ALL | LONG | SHORT direction pills
+  List:
+    - FlatList of Signal Cards, newest first
+    - Infinite scroll with pagination (20 per page)
+    - Pull-to-refresh
+    - Live indicator ("● LIVE") that pulses when WebSocket is connected
+
+  Signal Card layout:
+    - Top row: direction badge (green LONG or red SHORT),
+               coin name + exchange + market type,
+               time ago (e.g. "2h ago")
+    - Mid row: confidence bar (filled blocks out of 10, same as bot output),
+               confidence percentage, R:R ratio
+    - Bottom row: entry price range, TP1 / TP2 / TP3 abbreviated,
+                  outcome badge if closed (TP1 hit ✅ / SL hit ❌ / open ○)
+    - Style pill: SCALP (⚡) or SWING (📈)
+    - Timeframe label: 5m / 1h / 4h etc.
+
+  Behavior:
+    - Tap card → Signal Detail screen
+    - New signal arrives via WebSocket → prepend to top of list with animation
+    - Free tier: card shows blur/lock overlay after 3 signals with "Upgrade to see"
+
+SCREEN: Signal Detail
+  Full breakdown of one signal:
+
+  Section 1 — Header
+    Direction badge (LONG / SHORT with color)
+    Symbol, Exchange, Market type, Style, Timeframe
+    Confidence bar + percentage
+    AI reasoning text (pro/elite tier only)
+    ML win probability (elite tier only)
+
+  Section 2 — Trade Levels (visual price ladder)
+    A vertical price scale showing:
+      - TP3 (top)
+      - TP2
+      - TP1
+      - Entry Zone (highlighted band)
+      - Current price (live if possible)
+      - Stop Loss (bottom)
+    Each level shows: price + percentage from entry
+    Color coding: green for TPs, red for SL, yellow for entry zone
+
+  Section 3 — Risk Info
+    Risk:Reward ratio
+    Leverage recommendation
+    Validity window (scalp: 15-60 min / swing: 4-48 hours)
+
+  Section 4 — Setup (indicator reasons)
+    List of indicator reasons from reasons_json
+    Each reason prefixed with ✅
+    Below: RSI value, ADX value, Volume ratio, EMA200 status
+
+  Section 5 — Outcome (if closed)
+    Result badge: TP1 Hit / TP2 Hit / TP3 Hit / SL Hit / Expired
+    Profit/Loss percentage
+    Close price
+    Duration (created_at to closed_at)
+
+SCREEN: Performance / Stats
+  Header: Time range selector — 7D | 30D | 90D | ALL
+
+  Summary Cards row:
+    Total Signals | Win Rate % | Avg Profit % | Total P&L %
+
+  Win Rate Chart:
+    Line chart showing daily win rate over selected period
+    X-axis: dates, Y-axis: percentage
+
+  Cumulative P&L Chart:
+    Area chart showing cumulative profit over time
+
+  Breakdown Table:
+    Tabs: By Strategy | By Exchange | By Direction
+    Each tab shows: Total, Wins, Losses, Win Rate, Avg R:R
+
+  TP Level Distribution:
+    Horizontal bar chart: how many signals hit TP1 vs TP2 vs TP3 vs SL
+
+  Recent Closed Signals:
+    Last 5 closed signals with outcome badges
+
+SCREEN: Settings
+  Section: Notifications
+    - Master toggle (enable/disable all push notifications)
+    - Strategy: Scalp toggle / Swing toggle
+    - Direction: Long toggle / Short toggle
+    - Minimum Confidence: slider (70% to 95%, step 5)
+    - Exchanges: multi-select checkboxes (OKX, Bybit, Binance, KuCoin)
+    - Quiet Hours: toggle + start time picker + end time picker
+    - "Save Preferences" button → PUT /api/preferences
+
+  Section: Subscription
+    - Current plan name + expiry date
+    - Plan feature comparison list
+    - Upgrade button (opens RevenueCat paywall)
+
+  Section: Account
+    - Display name + email (read-only)
+    - Change Password option
+    - Logout button
+
+  Section: App Info
+    - Version number
+    - Terms of Service link
+    - Privacy Policy link
+    - Disclaimer: "This app provides technical analysis signals, not financial advice."
+
+7.4 Push Notification Handling
+--------------------------------
+  On app first launch (after auth):
+    1. Call expo-notifications to request permission
+    2. Get Expo push token via getExpoPushTokenAsync()
+    3. POST to /api/devices/register with token + platform
+    4. Store token locally
+
+  Foreground notification:
+    When app is open and a push arrives, show a custom in-app banner
+    (slide down from top, auto-dismiss after 4 seconds)
+    Banner shows: direction emoji + symbol + confidence
+    Tap → navigate to Signal Detail
+
+  Background / killed notification:
+    Standard OS notification
+    Title: "🟢 LONG BTC/USDT" (example)
+    Body: "SWING | OKX | Confidence: 82% | R:R 1:2.8"
+    Tap → app opens to Signal Detail for that signalId (from notification data)
+
+  Outcome notification:
+    When a signal closes:
+    Title: "✅ BTC/USDT — TP2 Hit"  or  "❌ ETH/USDT — Stop Loss Hit"
+    Body: "+3.5% profit" or "-2.0% loss"
+
+7.5 WebSocket Connection Management
+-------------------------------------
+  Connect on app foreground, disconnect on background
+  Reconnect with exponential backoff (1s, 2s, 4s, 8s, max 30s)
+  Auth via JWT in query param: ws://server:3000/ws?token=<JWT>
+  On signal.new event: prepend to signal list in state, show toast
+  On signal.update event: update outcome in existing signal in state
+
+7.6 Subscription Tiers
+------------------------
+  Free
+    - 3 signals per day (oldest visible, newest locked after limit)
+    - No AI reasoning
+    - No performance stats breakdown
+    - Push notifications for first 3 signals only
+
+  Basic ($9/month)
+    - Unlimited signals
+    - Push notifications for all signals
+    - Performance stats (7-day)
+    - No AI reasoning
+    - No ML win probability
+
+  Pro ($19/month)
+    - Everything in Basic
+    - AI reasoning shown on signal detail
+    - Performance stats up to 90 days
+    - Exchange filter in preferences
+
+  Elite ($39/month)
+    - Everything in Pro
+    - ML win probability shown
+    - All-time performance stats
+    - Priority signal delivery
+    - Future: auto-trade integration
+
+  RevenueCat product IDs (to be configured in RevenueCat dashboard):
+    azsignal_basic_monthly
+    azsignal_pro_monthly
+    azsignal_elite_monthly
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 8 — SIGNAL VISUAL DESIGN REFERENCE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+The existing bot produces signals in this exact format. The mobile app UI
+should visually reflect all these fields:
+
+  ─────────────────────────────────────
+  🚨 SIGNAL ALERT — LONG 🟢
+  ─────────────────────────────────────
+
+  📊 BTC/USDT  ·  BYBIT  ·  FUTURES
+  📈 SWING  |  ⏱ Timeframe: 4h
+
+  🟢 ENTRY ZONE
+     $67,400 – $67,600
+
+  🎯 TAKE PROFITS
+     TP1 → $68,500  (+1.6%)
+     TP2 → $69,800  (+3.5%)
+     TP3 → $71,200  (+5.6%)
+
+  🛡 STOP LOSS
+     $66,100  (-2.0%)
+
+  ⚖️ Risk:Reward → 1 : 2.8
+  💰 Leverage: 5–10x
+
+  📊 CONFIDENCE: ████████░░ 82%
+
+  🔍 SETUP
+     ✅ EMA 9>21>50 bull alignment
+     ✅ MACD bullish crossover
+     ✅ ADX trending bull (28)
+     ✅ OBV rising — accumulation
+     📌 RSI: 52.4  ·  ADX: 28  ·  Vol ×1.8
+
+  🕐 Valid for: 4–48 hours
+
+  #BTC #LONG #SWING #BYBIT #FUTURES
+  ─────────────────────────────────────
+
+Color scheme for the app:
+  LONG signals:   green accent   (#16C784 or similar)
+  SHORT signals:  red accent     (#EA3943 or similar)
+  Background:     dark theme     (#0D0D0D or #111827)
+  Card surface:   #1A1A2E or #1E2028
+  Text primary:   #FFFFFF
+  Text secondary: #9CA3AF
+  Confidence bar: filled = #F59E0B, empty = #374151
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 9 — MONETIZATION INTEGRATION (RevenueCat)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Mobile App Setup:
+  Install: npm install react-native-purchases
+  Initialize in app root with RevenueCat API key
+  On login: identify user by their user_id → Purchases.logIn(userId)
+
+Purchase Flow:
+  1. User taps "Upgrade" in settings
+  2. App calls Purchases.getOfferings() to get current packages
+  3. Show paywall screen with plan comparison
+  4. User selects plan → Purchases.purchasePackage()
+  5. On success: RevenueCat sends webhook to API backend
+  6. API backend updates user.subscription_tier in MySQL
+
+API Backend RevenueCat Webhook:
+  POST /api/webhook/revenuecat
+    Header: Authorization: <RevenueCat webhook auth key>
+    Body: RevenueCat event object
+    Action:
+      - On INITIAL_PURCHASE or RENEWAL:
+          find user by revenuecat_user_id
+          update subscription_tier and subscription_expiry
+      - On CANCELLATION or EXPIRATION:
+          downgrade user to 'free' tier
+
+Subscription Verification:
+  On each API request, middleware checks user.subscription_tier
+  and user.subscription_expiry before granting access to tier-gated data.
+  Alternatively call RevenueCat /subscribers endpoint to verify.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 10 — OCI SERVER DEPLOYMENT
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+The API backend is deployed on the same OCI Ubuntu server as the existing bot.
+
+Directory structure on server:
+  /home/ubuntu/
+    crypto-signal-bot/        (existing bot, unchanged)
+    azsignal-api/             (new API backend)
+
+PM2 ecosystem file (ecosystem.config.js):
+  module.exports = {
+    apps: [
+      {
+        name: "azsignal-api",
+        script: "./azsignal-api/src/index.js",
+        env: { NODE_ENV: "production", PORT: 3000 }
+      }
+    ]
+  }
+
+Nginx reverse proxy (if needed for HTTPS):
+  server {
+    listen 443 ssl;
+    server_name api.yourdomain.com;
+    location / {
+      proxy_pass http://localhost:3000;
+      proxy_http_version 1.1;
+      proxy_set_header Upgrade $http_upgrade;
+      proxy_set_header Connection "upgrade";
+      proxy_set_header Host $host;
+    }
+  }
+
+OCI Security List — open inbound ports:
+  3000 (API) or 443 (HTTPS if using nginx + SSL)
+
+MySQL:
+  If not already installed: sudo apt install mysql-server
+  Create database: CREATE DATABASE azsignal;
+  Create user with access to azsignal database
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 11 — BUILD AND RELEASE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Android:
+  Build: eas build --platform android --profile production
+  Output: .aab file
+  Upload to: Google Play Console → Internal testing → then production
+  Play Console requires: keystore file (generate once, store securely)
+
+iOS:
+  Build: eas build --platform ios --profile production
+  Output: .ipa file
+  Upload via: Xcode or Transporter app
+  Requires: Apple Developer Account ($99/year)
+  TestFlight: upload .ipa for beta testing before public release
+  App Store submission: via App Store Connect
+
+EAS (Expo Application Services):
+  eas.json profile example:
+  {
+    "build": {
+      "production": {
+        "android": { "buildType": "app-bundle" },
+        "ios": { "simulator": false }
+      }
+    }
+  }
+
+app.json key fields:
+  {
+    "expo": {
+      "name": "AzSignal Pro",
+      "slug": "azsignal-pro",
+      "version": "1.0.0",
+      "android": {
+        "package": "com.azyntra.azsignalpro",
+        "googleServicesFile": "./google-services.json"
+      },
+      "ios": {
+        "bundleIdentifier": "com.azyntra.azsignalpro"
+      },
+      "plugins": [
+        ["expo-notifications", { "icon": "./assets/notification-icon.png" }]
+      ]
+    }
+  }
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 12 — DEVELOPMENT PHASES AND MILESTONES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Phase 1 — API Backend Core (estimated: 5-7 days)
+  Deliverables:
+    - Node.js Express project setup with Prisma + MySQL
+    - Users table + device_tokens table + signals table
+    - POST /api/auth/register and /api/auth/login with JWT
+    - POST /api/webhook/signal (receive from bot, store in MySQL)
+    - GET /api/signals with pagination and filters
+    - GET /api/signals/:id
+    - PM2 deployment on OCI server
+  Test: fire a test webhook curl command, verify signal stored in MySQL
+
+Phase 2 — Push Notifications (estimated: 2-3 days)
+  Deliverables:
+    - POST /api/devices/register endpoint
+    - Push notification dispatch logic on webhook receipt
+    - Preference filtering (style, direction, confidence, exchange)
+    - Expo Push API integration with batch sending
+    - POST /api/webhook/signal-update for outcome notifications
+  Test: register a test device, fire test webhook, receive push notification
+
+Phase 3 — WebSocket + Stats API (estimated: 3 days)
+  Deliverables:
+    - WebSocket server on same port 3000
+    - signal.new + signal.update broadcast events
+    - GET /api/stats/summary with all breakdown fields
+    - GET /api/stats/chart for time-series data
+    - GET /api/preferences + PUT /api/preferences
+  Test: connect via wscat tool, verify events received on webhook fire
+
+Phase 4 — Mobile App: Auth + Navigation (estimated: 3-4 days)
+  Deliverables:
+    - Expo project init with all dependencies
+    - Login + Register screens
+    - JWT token storage in SecureStore
+    - Auto-login on app start
+    - Bottom tab navigation shell
+    - API service layer (Axios + React Query setup)
+
+Phase 5 — Mobile App: Signal Feed + Detail (estimated: 5-7 days)
+  Deliverables:
+    - Signal Feed screen with FlatList + Signal Cards
+    - Filter bar (strategy + direction pills)
+    - Pull-to-refresh + infinite scroll
+    - Signal Detail screen with all sections
+    - Price ladder visualization (vertical TP/SL display)
+    - WebSocket live update integration
+
+Phase 6 — Mobile App: Push Notifications (estimated: 2 days)
+  Deliverables:
+    - expo-notifications setup
+    - Permission request on first login
+    - Expo token registration with backend
+    - Foreground in-app banner
+    - Background tap → navigate to signal detail
+    - Outcome push notification handling
+
+Phase 7 — Mobile App: Performance + Settings (estimated: 3-4 days)
+  Deliverables:
+    - Performance screen with charts (Victory Native)
+    - Time range selector
+    - Breakdown tabs (strategy/exchange/direction)
+    - Settings screen: notification preferences form
+    - Settings screen: account info + logout
+
+Phase 8 — Monetization (estimated: 2-3 days)
+  Deliverables:
+    - RevenueCat SDK integration in mobile app
+    - Paywall screen with plan comparison
+    - RevenueCat webhook on API backend
+    - Subscription tier enforcement in API middleware
+    - Free tier signal gating (lock after 3/day)
+    - Tier-gated UI: blur/lock overlay for locked signals
+
+Phase 9 — QA + Store Submission (estimated: 5-7 days)
+  Deliverables:
+    - EAS build for Android .aab
+    - EAS build for iOS .ipa
+    - Internal testing on real devices
+    - Google Play Console internal track submission
+    - Apple TestFlight beta submission
+    - Bug fixes from testing
+    - Store listing: screenshots, description, privacy policy URL
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 13 — THIRD-PARTY ACCOUNTS AND CREDENTIALS NEEDED
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+To be set up by Azyntra Technologies before development starts:
+
+  1. Expo Account
+     URL: https://expo.dev
+     Needed for: EAS builds, Expo Push Notifications
+     Get: EXPO_ACCESS_TOKEN from account settings
+
+  2. Firebase Project (for FCM — Android push)
+     URL: https://console.firebase.google.com
+     Needed for: Android push notifications via Expo
+     Get: google-services.json file → add to Expo project root
+     Note: Expo handles FCM internally; just need google-services.json
+
+  3. Apple Developer Account (for APNs — iOS push + App Store)
+     URL: https://developer.apple.com
+     Cost: $99/year
+     Needed for: iOS push notifications, TestFlight, App Store
+
+  4. Google Play Console Account (for Android distribution)
+     URL: https://play.google.com/console
+     Cost: $25 one-time
+     Needed for: Publishing Android app
+
+  5. RevenueCat Account
+     URL: https://app.revenuecat.com
+     Needed for: Subscription management (both platforms)
+     Get: REVENUECAT_API_KEY (public SDK key) + webhook secret
+     Configure: create products in Play Console + App Store Connect first,
+                then link them in RevenueCat dashboard
+
+  6. Domain / SSL Certificate (recommended)
+     Set up a subdomain: api.azsignalpro.com pointing to OCI server IP
+     Get free SSL via Let's Encrypt: sudo certbot --nginx
+
+  7. OCI Server Access
+     Provide SSH credentials or public key to development team
+     Server already has: Python bot running, systemd, PM2 (if eSamithi deployed)
+     Team needs to: install Node.js 20, MySQL 8, nginx
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 14 — FILE AND FOLDER STRUCTURE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+API Backend (azsignal-api/):
+  src/
+    index.js              Express app entry point + WebSocket setup
+    routes/
+      auth.js             /api/auth/* routes
+      signals.js          /api/signals/* routes
+      stats.js            /api/stats/* routes
+      devices.js          /api/devices/* routes
+      preferences.js      /api/preferences routes
+      user.js             /api/user/* routes
+      webhook.js          /api/webhook/* routes (from bot + RevenueCat)
+    middleware/
+      auth.js             JWT verification middleware
+      tier.js             Subscription tier enforcement middleware
+    services/
+      pushService.js      Expo Push API calls + preference filtering
+      websocketService.js WebSocket broadcast logic
+    prisma/
+      schema.prisma       Database schema definition
+  .env
+  package.json
+  ecosystem.config.js     PM2 config
+
+Mobile App (azsignal-mobile/):
+  app/
+    (auth)/
+      login.tsx
+      register.tsx
+    (main)/
+      _layout.tsx         Tab navigator
+      signals/
+        index.tsx         Signal Feed
+        [id].tsx          Signal Detail
+      stats/
+        index.tsx         Performance screen
+      settings/
+        index.tsx         Settings screen
+  components/
+    SignalCard.tsx
+    PriceLadder.tsx
+    ConfidenceBar.tsx
+    DirectionBadge.tsx
+    OutcomeBadge.tsx
+    InAppNotificationBanner.tsx
+    PaywallScreen.tsx
+    FilterPills.tsx
+  services/
+    api.ts               Axios instance + interceptors (token refresh)
+    auth.ts              Login/register/logout
+    signals.ts           Signal fetch calls
+    stats.ts             Stats fetch calls
+    notifications.ts     Expo push token registration
+    websocket.ts         WebSocket connection management
+    purchases.ts         RevenueCat calls
+  store/
+    authStore.ts         Zustand: user + tokens
+    signalStore.ts       Zustand: cached signals + live updates
+    filterStore.ts       Zustand: current filter state
+  hooks/
+    useSignals.ts        React Query hook for signal list
+    useStats.ts          React Query hook for stats
+    useWebSocket.ts      WebSocket hook with auto-reconnect
+  assets/
+    notification-icon.png
+    icon.png
+    splash.png
+  app.json
+  eas.json
+  package.json
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 15 — KEY NOTES FOR DEVELOPMENT TEAM
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+1. DO NOT modify the existing Python bot codebase other than the small webhook
+   addition described in Section 6. The bot is live and generating signals.
+
+2. The existing bot uses SQLite. The API backend uses MySQL. These are separate
+   databases. The API backend receives signal data via webhook, not by reading
+   the SQLite file directly.
+
+3. All prices (entry, TP1/2/3, stop loss) must be displayed with appropriate
+   decimal precision:
+     >= $1000:  2 decimal places   e.g. $67,400.00
+     >= $1:     4 decimal places   e.g. $1.2345
+     >= $0.01:  5 decimal places   e.g. $0.12345
+     < $0.01:   8 decimal places   e.g. $0.00012345
+
+4. The confidence bar uses filled blocks:
+     filled blocks = round(confidence / 100 * 10)
+     e.g. 82% → 8 filled + 2 empty: ████████░░
+
+5. Signal deduplication is handled by the bot. The API backend stores every
+   signal it receives from the webhook without deduplication.
+
+6. The app must work correctly when there are no signals (empty state screens
+   with appropriate messaging).
+
+7. JWT access tokens expire in 15 minutes. Refresh tokens expire in 30 days.
+   The API service layer in the app must automatically refresh the access token
+   using the refresh token when a 401 response is received.
+
+8. For the WebSocket connection, the JWT token is passed as a query parameter
+   because the WebSocket API does not support custom headers in React Native.
+
+9. Quiet hours for notifications are stored in UTC in the database.
+   The app settings screen should convert to/from user local time.
+
+10. RevenueCat handles all receipt validation. Do not attempt to validate
+    receipts manually in the backend.
+
+11. The app should display a disclaimer on the Settings screen and in the
+    onboarding flow: "AzSignal Pro provides technical analysis signals only.
+    This is not financial advice. Always trade with proper risk management.
+    Never invest more than you can afford to lose."
+
+================================================================================
+END OF DOCUMENT
+AzSignal Pro Mobile Implementation Plan — Azyntra Technologies
+================================================================================

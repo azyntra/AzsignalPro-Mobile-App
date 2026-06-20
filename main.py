@@ -120,12 +120,24 @@ async def main():
     asyncio.create_task(run_scalp_scan())
     asyncio.create_task(run_swing_scan())
 
-    # Start Telegram bot polling
-    app = build_application()
-    async with app:
-        await app.start()
-        await app.updater.start_polling(drop_pending_updates=True)
-        logger.info("Telegram bot polling started. Press Ctrl+C to stop.")
+    # Start Telegram bot polling if token exists
+    if os.getenv("TELEGRAM_BOT_TOKEN"):
+        app = build_application()
+        async with app:
+            await app.start()
+            await app.updater.start_polling(drop_pending_updates=True)
+            logger.info("Telegram bot polling started. Press Ctrl+C to stop.")
+            try:
+                while True:
+                    await asyncio.sleep(60)
+            except (KeyboardInterrupt, SystemExit):
+                logger.info("Shutdown signal received.")
+            finally:
+                scheduler.shutdown(wait=False)
+                await app.updater.stop()
+                await app.stop()
+    else:
+        logger.warning("No TELEGRAM_BOT_TOKEN found. Running without Telegram bot.")
         try:
             while True:
                 await asyncio.sleep(60)
@@ -133,8 +145,6 @@ async def main():
             logger.info("Shutdown signal received.")
         finally:
             scheduler.shutdown(wait=False)
-            await app.updater.stop()
-            await app.stop()
 
     logger.info("Bot stopped cleanly.")
 
