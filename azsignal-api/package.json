@@ -13,7 +13,9 @@
   "type": "commonjs",
   "dependencies": {
     "@prisma/client": "^5.22.0",
+    "axios": "^1.18.0",
     "bcrypt": "^6.0.0",
+    "ccxt": "^4.5.59",
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
     "expo-server-sdk": "^6.1.0",
@@ -22,6 +24,8 @@
     "google-auth-library": "^10.7.0",
     "jsonwebtoken": "^9.0.3",
     "mysql2": "^3.22.5",
+    "node-cron": "^4.4.1",
+    "technicalindicators": "^3.1.0",
     "ws": "^8.21.0"
   },
   "devDependencies": {

@@ -13,8 +13,12 @@ const app = express();
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
 
+const cron = require('node-cron');
+const { runScalpScan, runSwingScan, registerWebSocket } = require('./scanner/engine');
+
 wss.on('connection', (ws) => {
   console.log('New WebSocket client connected');
+  registerWebSocket(ws);
   ws.on('error', console.error);
   
   ws.on('message', (data) => {
@@ -63,4 +67,20 @@ const PORT = process.env.PORT || 3000;
 
 server.listen(PORT, () => {
   console.log(`AzSignal Pro API & WebSocket Backend running on port ${PORT}`);
+  
+  // Start Scanner Schedules
+  console.log('Starting internal Crypto Scanner Cron Jobs...');
+  
+  // Scalping: Every 5 minutes
+  cron.schedule('*/5 * * * *', () => {
+    runScalpScan().catch(console.error);
+  });
+  
+  // Swing: Every 60 minutes
+  cron.schedule('0 * * * *', () => {
+    runSwingScan().catch(console.error);
+  });
+  
+  // Fire an initial scan on startup
+  setTimeout(() => runScalpScan().catch(console.error), 2000);
 });
