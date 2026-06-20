@@ -64,9 +64,12 @@ function validateAndBuild(rawResult, marketType, style) {
   const rrRatio = (Math.abs(entry - tp2) / Math.abs(entry - stopLoss));
 
   // Validation 3: R:R ratio
-  // User requested minimum 1:2 R:R. Since TP2 is 2.0x SL distance, it inherently is exactly 2.0 
-  // unless we bounded SL via EMA. Let's strictly enforce it.
   if (rrRatio < MIN_RR_RATIO) return null;
+
+  const riskPct = (Math.abs(entry - stopLoss) / entry) * 100;
+  const tp1Pct = (Math.abs(entry - tp1) / entry) * 100;
+  const tp2Pct = (Math.abs(entry - tp2) / entry) * 100;
+  const tp3Pct = (Math.abs(entry - tp3) / entry) * 100;
 
   return {
     direction,
@@ -77,6 +80,10 @@ function validateAndBuild(rawResult, marketType, style) {
     tp1,
     tp2,
     tp3,
+    tp1_pct: parseFloat(tp1Pct.toPrecision(3)),
+    tp2_pct: parseFloat(tp2Pct.toPrecision(3)),
+    tp3_pct: parseFloat(tp3Pct.toPrecision(3)),
+    risk_pct: parseFloat(riskPct.toPrecision(3)),
     rr_ratio: parseFloat(rrRatio.toFixed(2)),
     price_at_signal: parseFloat(entry.toPrecision(5)),
     reasons,
