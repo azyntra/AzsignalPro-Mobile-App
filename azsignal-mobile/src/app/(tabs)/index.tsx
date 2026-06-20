@@ -1,6 +1,6 @@
-import { View, Text, FlatList, TouchableOpacity, RefreshControl, ScrollView } from 'react-native';
+import { View, Text, FlatList, TouchableOpacity, RefreshControl, ScrollView, Animated, StyleSheet, StatusBar } from 'react-native';
 import { useRouter } from 'expo-router';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import api from '../../api';
 import { useSignalStore, Signal } from '../../store/signals';
 import { useAuthStore } from '../../store/auth';
@@ -13,6 +13,17 @@ export default function SignalFeedScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [activeFilter, setActiveFilter] = useState('All');
   const router = useRouter();
+  
+  const pulseAnim = useRef(new Animated.Value(1)).current;
+
+  useEffect(() => {
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulseAnim, { toValue: 0.2, duration: 1000, useNativeDriver: true }),
+        Animated.timing(pulseAnim, { toValue: 1, duration: 1000, useNativeDriver: true })
+      ])
+    ).start();
+  }, []);
 
   const fetchSignals = async () => {
     try {
@@ -57,102 +68,115 @@ export default function SignalFeedScreen() {
 
   const renderSignal = ({ item }: { item: Signal }) => {
     const isLong = item.direction === 'LONG';
-    const borderColor = isLong ? 'border-[#16C784]' : 'border-[#EA3943]';
-    const badgeColor = isLong ? 'border-[#16C784] text-[#16C784]' : 'border-[#EA3943] text-[#EA3943]';
+    const mainColor = isLong ? '#16C784' : '#EA3943';
     
-    // Outcome status handling
-    let dotColor = '#9CA3AF'; // gray
-    let statusText = 'Open';
-    if (item.outcome === 'WIN') {
-      dotColor = '#16C784';
-      statusText = '✓ TP Hit';
-    } else if (item.outcome === 'LOSS') {
-      dotColor = '#EA3943';
-      statusText = '✗ SL Hit';
-    } else {
-      dotColor = '#9CA3AF';
-      statusText = '• Open';
-    }
+    let statusText = 'ACTIVE';
+    let statusColor = '#3B82F6';
 
-    const isLocked = user?.tier === 'free' || user?.tier === 'basic' ? false : false; // Placeholder logic for locked state
+    if (item.outcome === 'WIN') {
+      statusText = 'TARGET HIT';
+      statusColor = '#16C784';
+    } else if (item.outcome === 'LOSS') {
+      statusText = 'STOPPED OUT';
+      statusColor = '#EA3943';
+    }
 
     return (
       <TouchableOpacity 
-        className={`bg-secondary rounded-2xl p-4 mb-4 border-l-4 border-t border-b border-r border-t-gray-800 border-b-gray-800 border-r-gray-800 ${borderColor}`}
+        activeOpacity={0.8}
         onPress={() => router.push(`/signal/${item.id}`)}
+        style={styles.cardContainer}
       >
-        {/* Header Row */}
-        <View className="flex-row justify-between items-center mb-1">
-          <View className="flex-row items-center space-x-2">
-            <View className={`border px-2 py-0.5 rounded-sm ${badgeColor}`}>
-              <Text className={`font-bold text-[10px] ${badgeColor}`}>{item.direction}</Text>
+        {/* Top Accent Line */}
+        <View style={[styles.cardAccentLine, { backgroundColor: mainColor }]} />
+
+        <View style={styles.cardContent}>
+          {/* Header */}
+          <View style={styles.cardHeader}>
+            <View style={styles.symbolContainer}>
+              <MaterialCommunityIcons name={isLong ? "trending-up" : "trending-down"} size={22} color={mainColor} />
+              <Text style={styles.symbolText}>{item.symbol}</Text>
             </View>
-            <Text className="text-white font-bold text-lg">{item.symbol}</Text>
+            <View style={styles.timeBadge}>
+              <MaterialCommunityIcons name="clock-outline" size={12} color="#9CA3AF" />
+              <Text style={styles.timeText}>{getTimeAgo(item.created_at)}</Text>
+            </View>
           </View>
-          <Text className="text-gray-500 text-xs">{getTimeAgo(item.created_at)}</Text>
+
+          {/* Meta Information */}
+          <Text style={styles.metaText}>
+            {item.exchange} • {item.market_type} • {item.timeframe} {item.style}
+          </Text>
+
+          {/* Data Grid */}
+          <View style={styles.gridContainer}>
+            <View style={styles.gridItem}>
+              <Text style={styles.gridLabel}>ENTRY</Text>
+              <Text style={styles.gridValue}>${item.entry_low}</Text>
+            </View>
+            <View style={styles.gridDivider} />
+            <View style={styles.gridItem}>
+              <Text style={styles.gridLabel}>TARGET 1</Text>
+              <Text style={[styles.gridValue, { color: '#16C784' }]}>
+                +{item.tp1_pct ? item.tp1_pct.toFixed(2) : '0.00'}%
+              </Text>
+            </View>
+            <View style={styles.gridDivider} />
+            <View style={[styles.gridItem, { alignItems: 'flex-end' }]}>
+              <Text style={styles.gridLabel}>STATUS</Text>
+              <Text style={[styles.gridValue, { color: statusColor, fontSize: 12 }]}>{statusText}</Text>
+            </View>
+          </View>
+
+          {/* Confidence Bar */}
+          <ConfidenceBar confidence={item.confidence} rrRatio={`1:${item.rr_ratio}`} />
         </View>
-
-        {/* Meta Row */}
-        <Text className="text-gray-400 text-[10px] tracking-widest font-semibold mb-2 uppercase">
-          {item.exchange} · {item.market_type} · {item.timeframe} {item.style}
-        </Text>
-
-        {/* Confidence & RR */}
-        <ConfidenceBar confidence={item.confidence} rrRatio={`1:${item.rr_ratio}`} />
-
-        {/* Targets Row */}
-        <View className="flex-row justify-between items-center mt-3">
-          <View>
-            <Text className="text-goldText text-xs font-semibold mb-1">
-              ${item.entry_low}–${item.entry_high}
-            </Text>
-            <Text className="text-gray-400 text-xs font-medium">
-              <Text className="text-[#16C784]">TP1 +{item.tp1_pct ? item.tp1_pct.toFixed(2) : 0}%</Text>   <Text className="text-[#16C784]">TP2 +{item.tp2_pct ? item.tp2_pct.toFixed(2) : 0}%</Text>
-            </Text>
-          </View>
-          <View className="items-end justify-end h-full">
-            <Text className={`text-xs font-semibold ${item.outcome === 'WIN' ? 'text-[#16C784]' : item.outcome === 'LOSS' ? 'text-[#EA3943]' : 'text-gray-400'}`}>
-              {statusText}
-            </Text>
-          </View>
-        </View>
-        
-        {/* Lock Overlay for Free users - Add later if needed */}
       </TouchableOpacity>
     );
   };
 
   return (
-    <View className="flex-1 bg-background pt-12">
-      {/* App Header */}
-      <View className="px-5 mb-4">
-        <Text className="text-white text-3xl font-bold tracking-tight">AzSignal Pro</Text>
-        <View className="flex-row items-center mt-1">
-          <View className="w-2 h-2 rounded-full bg-[#16C784] mr-2 animate-pulse" />
-          <Text className="text-gray-400 text-sm font-medium">Live</Text>
+    <View style={styles.container}>
+      <StatusBar barStyle="light-content" />
+      
+      {/* Header */}
+      <View style={styles.headerContainer}>
+        <View>
+          <Text style={styles.headerTitle}>AzSignal Pro</Text>
+          <View style={styles.liveIndicatorContainer}>
+            <Animated.View style={[styles.liveDot, { opacity: pulseAnim }]} />
+            <Text style={styles.liveText}>LIVE MARKET</Text>
+          </View>
         </View>
+        <TouchableOpacity style={styles.notificationButton}>
+          <MaterialCommunityIcons name="bell-ring-outline" size={24} color="#FFF" />
+          <View style={styles.notificationBadge} />
+        </TouchableOpacity>
       </View>
 
       {/* Filters */}
-      <View className="px-5 mb-4">
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} className="flex-row">
-          {filters.map(filter => (
-            <TouchableOpacity
-              key={filter}
-              onPress={() => setActiveFilter(filter)}
-              className={`px-4 py-1.5 rounded-full mr-2 border ${
-                activeFilter === filter 
-                  ? 'bg-[#16C784]/20 border-[#16C784]' 
-                  : 'bg-transparent border-gray-800'
-              }`}
-            >
-              <Text className={`text-sm font-medium ${
-                activeFilter === filter ? 'text-[#16C784]' : 'text-gray-400'
-              }`}>
-                {filter}
-              </Text>
-            </TouchableOpacity>
-          ))}
+      <View style={styles.filtersContainer}>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filtersScrollContent}>
+          {filters.map(filter => {
+            const isActive = activeFilter === filter;
+            return (
+              <TouchableOpacity
+                key={filter}
+                onPress={() => setActiveFilter(filter)}
+                style={[
+                  styles.filterPill,
+                  isActive ? styles.filterPillActive : styles.filterPillInactive
+                ]}
+              >
+                <Text style={[
+                  styles.filterText,
+                  isActive ? styles.filterTextActive : styles.filterTextInactive
+                ]}>
+                  {filter}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
         </ScrollView>
       </View>
 
@@ -161,15 +185,19 @@ export default function SignalFeedScreen() {
         data={filteredSignals}
         keyExtractor={(item) => item.id.toString()}
         renderItem={renderSignal}
-        contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 20 }}
+        contentContainerStyle={styles.listContent}
+        showsVerticalScrollIndicator={false}
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#16C784" />
         }
         ListEmptyComponent={
-          <View className="flex-1 items-center justify-center py-20 mt-10">
-            <MaterialCommunityIcons name="satellite-uplink" size={48} color="#333" />
-            <Text className="text-gray-500 mt-4 text-center font-medium">
-              Scanning the market...{'\n'}No signals matching your criteria.
+          <View style={styles.emptyContainer}>
+            <View style={styles.emptyIconContainer}>
+              <MaterialCommunityIcons name="satellite-variant" size={48} color="#16C784" />
+            </View>
+            <Text style={styles.emptyTitle}>Scanning Markets</Text>
+            <Text style={styles.emptySubtitle}>
+              Our AI is currently analyzing charts.{'\n'}Signals will appear here automatically.
             </Text>
           </View>
         }
@@ -177,3 +205,217 @@ export default function SignalFeedScreen() {
     </View>
   );
 }
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#0F1115',
+    paddingTop: 60,
+  },
+  headerContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 24,
+    marginBottom: 24,
+  },
+  headerTitle: {
+    color: '#FFF',
+    fontSize: 28,
+    fontWeight: '800',
+    letterSpacing: -0.5,
+    marginBottom: 6,
+  },
+  liveIndicatorContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(22, 199, 132, 0.1)',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+    alignSelf: 'flex-start',
+    borderWidth: 1,
+    borderColor: 'rgba(22, 199, 132, 0.2)',
+  },
+  liveDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#16C784',
+    marginRight: 6,
+  },
+  liveText: {
+    color: '#16C784',
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 1,
+  },
+  notificationButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: '#1A1D24',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.05)',
+  },
+  notificationBadge: {
+    position: 'absolute',
+    top: 10,
+    right: 12,
+    width: 8,
+    height: 8,
+    backgroundColor: '#EA3943',
+    borderRadius: 4,
+    borderWidth: 2,
+    borderColor: '#1A1D24',
+  },
+  filtersContainer: {
+    marginBottom: 20,
+  },
+  filtersScrollContent: {
+    paddingHorizontal: 24,
+  },
+  filterPill: {
+    paddingHorizontal: 20,
+    paddingVertical: 8,
+    borderRadius: 20,
+    marginRight: 10,
+    borderWidth: 1,
+  },
+  filterPillActive: {
+    backgroundColor: '#16C784',
+    borderColor: '#16C784',
+  },
+  filterPillInactive: {
+    backgroundColor: '#1A1D24',
+    borderColor: 'rgba(255,255,255,0.05)',
+  },
+  filterText: {
+    fontSize: 13,
+    fontWeight: '700',
+    letterSpacing: 0.5,
+  },
+  filterTextActive: {
+    color: '#000',
+  },
+  filterTextInactive: {
+    color: '#9CA3AF',
+  },
+  listContent: {
+    paddingHorizontal: 24,
+    paddingBottom: 40,
+  },
+  cardContainer: {
+    backgroundColor: '#1A1D24',
+    borderRadius: 16,
+    marginBottom: 16,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.03)',
+  },
+  cardAccentLine: {
+    height: 4,
+    width: '100%',
+  },
+  cardContent: {
+    padding: 16,
+  },
+  cardHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  symbolContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  symbolText: {
+    color: '#FFF',
+    fontSize: 18,
+    fontWeight: '800',
+    marginLeft: 8,
+    letterSpacing: 0.5,
+  },
+  timeBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+  },
+  timeText: {
+    color: '#9CA3AF',
+    fontSize: 10,
+    fontWeight: '600',
+    marginLeft: 4,
+  },
+  metaText: {
+    color: '#6B7280',
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 1,
+    textTransform: 'uppercase',
+    marginBottom: 16,
+  },
+  gridContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#0F1115',
+    padding: 12,
+    borderRadius: 12,
+    marginBottom: 12,
+  },
+  gridItem: {
+    flex: 1,
+  },
+  gridDivider: {
+    width: 1,
+    height: 24,
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    marginHorizontal: 12,
+  },
+  gridLabel: {
+    color: '#6B7280',
+    fontSize: 9,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+    marginBottom: 4,
+  },
+  gridValue: {
+    color: '#FFF',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  emptyContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 60,
+  },
+  emptyIconContainer: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: 'rgba(22, 199, 132, 0.1)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  emptyTitle: {
+    color: '#FFF',
+    fontSize: 20,
+    fontWeight: '800',
+    marginBottom: 8,
+  },
+  emptySubtitle: {
+    color: '#9CA3AF',
+    fontSize: 14,
+    textAlign: 'center',
+    lineHeight: 22,
+  },
+});
