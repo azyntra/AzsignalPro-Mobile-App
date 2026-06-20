@@ -17,6 +17,7 @@ services:
       # The database URL maps to the persistent volume mount inside the container
       - DATABASE_URL=file:./data/dev.db
       - JWT_SECRET=your_super_secret_jwt_key_here
+      - JWT_REFRESH_SECRET=your_super_secret_refresh_key_here
       # Assuming Oracle server runs everything locally via docker bridge
       - WEBHOOK_SECRET=your_webhook_secret_here
 
