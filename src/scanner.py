@@ -155,7 +155,11 @@ async def _process_scalp(exchange: str, symbol: str, market_type: str):
         "price_at_signal": record.price_at_signal,
         "leverage": "20x" if record.market_type == "futures" else "1x",
         "reasons": signal.get("reasons", []),
-        "indicators": signal.get("indicators", {}),
+        "indicators": {
+            **signal.get("indicators", {}),
+            "ml_win_prob": f"{signal.get('ml_win_prob', 50)}%",
+            "sentiment": signal.get("sentiment", {}).get("label") if isinstance(signal.get("sentiment"), dict) else str(signal.get("sentiment", "Neutral"))
+        },
         "ai_decision": record.ai_decision,
         "ai_adjusted_confidence": record.ai_adjusted_confidence,
         "ai_reasoning": record.ai_reasoning,
@@ -262,7 +266,11 @@ async def _process_swing(exchange: str, symbol: str, market_type: str):
         "price_at_signal": record.price_at_signal,
         "leverage": "20x" if record.market_type == "futures" else "1x",
         "reasons": signal.get("reasons", []),
-        "indicators": signal.get("indicators", {}),
+        "indicators": {
+            **signal.get("indicators", {}),
+            "ml_win_prob": f"{signal.get('ml_win_prob', 50)}%",
+            "sentiment": signal.get("sentiment", {}).get("label") if isinstance(signal.get("sentiment"), dict) else str(signal.get("sentiment", "Neutral"))
+        },
         "ai_decision": record.ai_decision,
         "ai_adjusted_confidence": record.ai_adjusted_confidence,
         "ai_reasoning": record.ai_reasoning,

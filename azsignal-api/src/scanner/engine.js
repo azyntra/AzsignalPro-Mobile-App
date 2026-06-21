@@ -3,7 +3,7 @@ const { fetchTopCoins, getExchangePairs, fetchMultiTimeframe } = require('./fetc
 const { computeIndicators } = require('./indicators');
 const { scoreScalp, scoreSwing } = require('./strategies');
 const { validateAndBuild } = require('./validator');
-
+const { getFearGreedIndex, calculateMLProb, reviewSignal } = require('./ai');
 const prisma = new PrismaClient();
 
 // Limit signals per hour
@@ -115,6 +115,24 @@ async function saveAndBroadcast(signal, symbol, exchange, marketType, style, tim
   signalsThisHour.push(now);
 
   try {
+    // AI Analysis Block
+    const sentiment = await getFearGreedIndex();
+    const mlProb = calculateMLProb(signal);
+    
+    // ML Probability Filter (same as Python logic)
+    if (mlProb < 40) {
+      console.log(`Signal ${symbol} ${signal.direction} dropped: ML Win Prob ${mlProb}%`);
+      return;
+    }
+
+    const aiReview = await reviewSignal(signal, symbol, exchange, style, marketType, sentiment);
+    
+    // AI Rejection Filter
+    if (aiReview.action === 'REJECT') {
+      console.log(`Signal ${symbol} ${signal.direction} REJECTED by AI: ${aiReview.reasoning}`);
+      return;
+    }
+
     const record = await prisma.signal.create({
       data: {
         symbol,
@@ -123,7 +141,7 @@ async function saveAndBroadcast(signal, symbol, exchange, marketType, style, tim
         style,
         timeframe,
         direction: signal.direction,
-        confidence: signal.confidence,
+        confidence: aiReview.adjustedConfidence || signal.confidence,
         entry_low: signal.entry_low,
         entry_high: signal.entry_high,
         tp1: signal.tp1,
@@ -143,7 +161,12 @@ async function saveAndBroadcast(signal, symbol, exchange, marketType, style, tim
           rsi: signal.indicators.rsi,
           macd: signal.indicators.macd?.MACD,
           ema50: signal.indicators.ema50,
+          ml_win_prob: `${mlProb}%`,
+          sentiment: sentiment.label,
         }),
+        ai_decision: aiReview.action,
+        ai_adjusted_conf: aiReview.adjustedConfidence || signal.confidence,
+        ai_reasoning: aiReview.reasoning,
       }
     });
 
