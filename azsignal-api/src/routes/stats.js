@@ -182,4 +182,50 @@ router.get('/', authenticateToken, async (req, res) => {
   }
 });
 
+/**
+ * DELETE /api/stats/cleanup
+ * Removes expired signals that never received an outcome.
+ * Scalp: older than 1 hour, Swing: older than 72 hours.
+ */
+router.delete('/cleanup', authenticateToken, async (req, res) => {
+  try {
+    const now = new Date();
+    const oneHourAgo = new Date(now.getTime() - 1 * 60 * 60 * 1000);
+    const seventyTwoHoursAgo = new Date(now.getTime() - 72 * 60 * 60 * 1000);
+
+    // Delete expired scalp signals (no outcome, older than 1 hour)
+    const deletedScalp = await prisma.signal.deleteMany({
+      where: {
+        outcome: null,
+        style: 'scalp',
+        created_at: { lt: oneHourAgo },
+      },
+    });
+
+    // Delete expired swing signals (no outcome, older than 72 hours)
+    const deletedSwing = await prisma.signal.deleteMany({
+      where: {
+        outcome: null,
+        style: 'swing',
+        created_at: { lt: seventyTwoHoursAgo },
+      },
+    });
+
+    const total = deletedScalp.count + deletedSwing.count;
+    console.log(`[Cleanup] Deleted ${deletedScalp.count} scalp + ${deletedSwing.count} swing = ${total} expired signals`);
+
+    res.json({
+      success: true,
+      deleted: {
+        scalp: deletedScalp.count,
+        swing: deletedSwing.count,
+        total,
+      },
+    });
+  } catch (error) {
+    console.error('Cleanup failed', error);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
 module.exports = router;
