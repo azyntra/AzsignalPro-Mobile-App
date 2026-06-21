@@ -4,6 +4,7 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useSignalStore, Signal } from '../../store/signals';
 import { ConfidenceBar } from '../../components/ConfidenceBar';
 import { LinearGradient } from 'expo-linear-gradient';
+import * as Haptics from 'expo-haptics';
 
 export default function SignalDetailScreen() {
   const { id } = useLocalSearchParams();
@@ -26,11 +27,22 @@ export default function SignalDetailScreen() {
 
   const isLong = signal.direction === 'LONG';
   const mainColor = isLong ? '#10B981' : '#FB7185';
-  const gradientColors = isLong 
-    ? ['rgba(16, 185, 129, 0.15)', 'rgba(2, 6, 23, 0.95)'] 
-    : ['rgba(239, 68, 68, 0.15)', 'rgba(2, 6, 23, 0.95)'];
+  const isClosed = !!signal.outcome;
+  const isWin = ['TP1', 'TP2', 'TP3'].includes(signal.outcome || '');
+  const isSL = signal.outcome === 'SL';
+  const isExpired = signal.outcome === 'EXPIRED';
+  
+  const gradientColors = isClosed
+    ? (isWin 
+        ? ['rgba(22, 199, 132, 0.2)', 'rgba(2, 6, 23, 0.95)']
+        : isSL 
+          ? ['rgba(234, 57, 67, 0.2)', 'rgba(2, 6, 23, 0.95)']
+          : ['rgba(100, 116, 139, 0.15)', 'rgba(2, 6, 23, 0.95)'])
+    : isLong 
+      ? ['rgba(16, 185, 129, 0.15)', 'rgba(2, 6, 23, 0.95)'] 
+      : ['rgba(239, 68, 68, 0.15)', 'rgba(2, 6, 23, 0.95)'];
 
-  // Parse JSON fields safely (handle both string and already-parsed object/array)
+  // Parse JSON fields safely
   let reasons: string[] = [];
   try {
     if (Array.isArray(signal.reasons_json)) {
@@ -49,9 +61,19 @@ export default function SignalDetailScreen() {
     }
   } catch (e) {}
 
+  // Check which TPs have been hit
+  const tp1Hit = ['TP1', 'TP2', 'TP3'].includes(signal.outcome || '');
+  const tp2Hit = ['TP2', 'TP3'].includes(signal.outcome || '');
+  const tp3Hit = signal.outcome === 'TP3';
+  const slHit = signal.outcome === 'SL';
+
   const handleShare = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    const outcomeText = isClosed
+      ? `Result: ${signal.outcome} (${signal.profit_pct && signal.profit_pct >= 0 ? '+' : ''}${signal.profit_pct?.toFixed(2)}%)`
+      : `Entry: $${signal.entry_low} - Targets up to +${signal.tp3_pct?.toFixed(2)}%`;
     Share.share({ 
-      message: `Check out this ${signal.direction} signal on ${signal.symbol}! Entry: $${signal.entry_low} - Targets up to +${signal.tp3_pct?.toFixed(2)}% 🚀` 
+      message: `🚀 ${signal.direction} signal on ${signal.symbol}! ${outcomeText} | AzSignal Pro` 
     });
   };
 
@@ -73,6 +95,41 @@ export default function SignalDetailScreen() {
 
       <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
         
+        {/* Outcome Banner */}
+        {isClosed && (
+          <View style={[styles.outcomeBanner, {
+            backgroundColor: isWin ? 'rgba(22, 199, 132, 0.12)' : isSL ? 'rgba(234, 57, 67, 0.12)' : 'rgba(100, 116, 139, 0.12)',
+            borderColor: isWin ? 'rgba(22, 199, 132, 0.25)' : isSL ? 'rgba(234, 57, 67, 0.25)' : 'rgba(100, 116, 139, 0.25)',
+          }]}>
+            <View style={styles.outcomeBannerLeft}>
+              <MaterialCommunityIcons 
+                name={isWin ? 'trophy' : isSL ? 'shield-alert' : 'clock-alert-outline'} 
+                size={28} 
+                color={isWin ? '#16C784' : isSL ? '#EA3943' : '#9CA3AF'} 
+              />
+              <View style={{ marginLeft: 12 }}>
+                <Text style={[styles.outcomeBannerTitle, {
+                  color: isWin ? '#16C784' : isSL ? '#EA3943' : '#9CA3AF',
+                }]}>
+                  {isWin ? 'TARGET HIT' : isSL ? 'STOPPED OUT' : 'EXPIRED'}
+                </Text>
+                <Text style={styles.outcomeBannerSubtitle}>
+                  {signal.outcome} • Closed at ${signal.price_at_close?.toFixed ? 
+                    (signal.price_at_close > 10 ? signal.price_at_close.toFixed(2) : signal.price_at_close.toPrecision(5)) 
+                    : signal.price_at_close}
+                </Text>
+              </View>
+            </View>
+            <Text style={[styles.outcomeBannerPnl, {
+              color: isWin ? '#16C784' : isSL ? '#EA3943' : '#9CA3AF',
+            }]}>
+              {signal.profit_pct !== undefined && signal.profit_pct !== null
+                ? `${signal.profit_pct >= 0 ? '+' : ''}${signal.profit_pct.toFixed(2)}%`
+                : ''}
+            </Text>
+          </View>
+        )}
+
         {/* Hero Section */}
         <LinearGradient
           colors={gradientColors as [string, string]}
@@ -129,17 +186,26 @@ export default function SignalDetailScreen() {
             <Text style={styles.sectionTitle}>TRADE SETUP</Text>
 
             <View style={styles.ladderRow}>
-              <Text style={styles.ladderLabelGreen}>TP3</Text>
+              <View style={styles.ladderLabelContainer}>
+                <Text style={styles.ladderLabelGreen}>TP3</Text>
+                {tp3Hit && <MaterialCommunityIcons name="check-circle" size={14} color="#16C784" style={{ marginLeft: 4 }} />}
+              </View>
               <Text style={styles.ladderPrice}>${signal.tp3}</Text>
               <Text style={styles.ladderPctGreen}>+{signal.tp3_pct?.toFixed(2)}%</Text>
             </View>
             <View style={styles.ladderRow}>
-              <Text style={styles.ladderLabelGreen}>TP2</Text>
+              <View style={styles.ladderLabelContainer}>
+                <Text style={styles.ladderLabelGreen}>TP2</Text>
+                {tp2Hit && <MaterialCommunityIcons name="check-circle" size={14} color="#16C784" style={{ marginLeft: 4 }} />}
+              </View>
               <Text style={styles.ladderPrice}>${signal.tp2}</Text>
               <Text style={styles.ladderPctGreen}>+{signal.tp2_pct?.toFixed(2)}%</Text>
             </View>
             <View style={styles.ladderRow}>
-              <Text style={styles.ladderLabelGreen}>TP1</Text>
+              <View style={styles.ladderLabelContainer}>
+                <Text style={styles.ladderLabelGreen}>TP1</Text>
+                {tp1Hit && <MaterialCommunityIcons name="check-circle" size={14} color="#16C784" style={{ marginLeft: 4 }} />}
+              </View>
               <Text style={styles.ladderPrice}>${signal.tp1}</Text>
               <Text style={styles.ladderPctGreen}>+{signal.tp1_pct?.toFixed(2)}%</Text>
             </View>
@@ -154,12 +220,21 @@ export default function SignalDetailScreen() {
 
             <View style={styles.ladderRow}>
               <Text style={styles.ladderLabelGray}>Current</Text>
-              <Text style={styles.ladderPriceCurrent}>${signal.price_at_signal}</Text>
-              <Text style={styles.ladderPctGray}>-</Text>
+              <Text style={styles.ladderPriceCurrent}>
+                ${isClosed && signal.price_at_close
+                  ? (signal.price_at_close > 10 ? signal.price_at_close.toFixed(2) : signal.price_at_close.toPrecision(5))
+                  : signal.price_at_signal}
+              </Text>
+              <Text style={styles.ladderPctGray}>
+                {isClosed ? (isWin ? '✅' : isSL ? '❌' : '⏰') : '-'}
+              </Text>
             </View>
 
             <View style={[styles.ladderRow, { borderBottomWidth: 0, paddingBottom: 0 }]}>
-              <Text style={styles.ladderLabelRed}>Stop Loss</Text>
+              <View style={styles.ladderLabelContainer}>
+                <Text style={styles.ladderLabelRed}>Stop Loss</Text>
+                {slHit && <MaterialCommunityIcons name="close-circle" size={14} color="#EA3943" style={{ marginLeft: 4 }} />}
+              </View>
               <Text style={styles.ladderPrice}>${signal.stop_loss}</Text>
               <Text style={styles.ladderPctRed}>-{signal.risk_pct?.toFixed(2)}%</Text>
             </View>
@@ -269,6 +344,38 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     letterSpacing: 0.5,
   },
+  // Outcome Banner
+  outcomeBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginHorizontal: 16,
+    marginBottom: 4,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    borderRadius: 16,
+    borderWidth: 1,
+  },
+  outcomeBannerLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  outcomeBannerTitle: {
+    fontSize: 14,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+  },
+  outcomeBannerSubtitle: {
+    color: '#94A3B8',
+    fontSize: 11,
+    fontWeight: '600',
+    marginTop: 2,
+  },
+  outcomeBannerPnl: {
+    fontSize: 22,
+    fontWeight: '900',
+    letterSpacing: -0.5,
+  },
   heroSection: {
     borderBottomWidth: 1,
     borderColor: 'rgba(255,255,255,0.05)',
@@ -343,9 +450,14 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderColor: 'rgba(255,255,255,0.05)',
   },
-  ladderLabelGreen: { color: '#10B981', fontSize: 13, fontWeight: '800', width: '20%' },
-  ladderLabelRed: { color: '#FB7185', fontSize: 13, fontWeight: '800', width: '25%' },
-  ladderLabelGray: { color: '#94A3B8', fontSize: 13, fontWeight: '700', width: '20%' },
+  ladderLabelContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    width: '25%',
+  },
+  ladderLabelGreen: { color: '#10B981', fontSize: 13, fontWeight: '800' },
+  ladderLabelRed: { color: '#FB7185', fontSize: 13, fontWeight: '800' },
+  ladderLabelGray: { color: '#94A3B8', fontSize: 13, fontWeight: '700', width: '25%' },
   
   ladderPrice: { color: '#F8FAFC', fontSize: 15, fontWeight: '700', flex: 1, textAlign: 'center' },
   ladderPriceCurrent: { color: '#FCD34D', fontSize: 15, fontWeight: '700', flex: 1, textAlign: 'center' },
@@ -419,51 +531,12 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
     marginBottom: 12,
   },
-  reasonDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    marginTop: 8,
-    marginRight: 12,
-  },
   reasonText: {
     color: '#E2E8F0',
     fontSize: 14,
     lineHeight: 22,
     flex: 1,
     fontWeight: '500',
-  },
-  chipsContainer: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    marginTop: 16,
-    paddingTop: 16,
-    borderTopWidth: 1,
-    borderColor: 'rgba(255,255,255,0.05)',
-  },
-  chip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#1E293B',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 100,
-    marginRight: 8,
-    marginBottom: 8,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.05)',
-  },
-  chipLabel: {
-    color: '#94A3B8',
-    fontSize: 11,
-    fontWeight: '700',
-    marginRight: 6,
-    textTransform: 'uppercase',
-  },
-  chipValue: {
-    color: '#F8FAFC',
-    fontSize: 12,
-    fontWeight: '800',
   },
   aiMetaContainer: {
     marginTop: 16,

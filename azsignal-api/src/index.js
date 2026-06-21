@@ -14,7 +14,7 @@ const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
 
 const cron = require('node-cron');
-const { runScalpScan, runSwingScan, registerWebSocket } = require('./scanner/engine');
+const { runScalpScan, runSwingScan, runOutcomeTracker, registerWebSocket } = require('./scanner/engine');
 
 wss.on('connection', (ws) => {
   console.log('New WebSocket client connected');
@@ -82,7 +82,14 @@ server.listen(PORT, () => {
   cron.schedule('0 * * * *', () => {
     runSwingScan().catch(console.error);
   });
+
+  // Outcome Tracker: Every 60 seconds — checks if any open signal hit TP/SL
+  cron.schedule('* * * * *', () => {
+    runOutcomeTracker().catch(console.error);
+  });
   
   // Fire an initial scan on startup
   setTimeout(() => runScalpScan().catch(console.error), 2000);
+  // Fire initial outcome check after 10 seconds
+  setTimeout(() => runOutcomeTracker().catch(console.error), 10000);
 });

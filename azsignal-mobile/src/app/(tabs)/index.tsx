@@ -7,11 +7,95 @@ import { useAuthStore } from '../../store/auth';
 import { ConfidenceBar } from '../../components/ConfidenceBar';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useFocusEffect } from 'expo-router';
+import * as Haptics from 'expo-haptics';
+
+// ─── Skeleton Card Component ─────────────────────────────────────────────────
+function SkeletonCard({ delay = 0 }: { delay?: number }) {
+  const opacity = useRef(new Animated.Value(0.3)).current;
+
+  useEffect(() => {
+    const timeout = setTimeout(() => {
+      Animated.loop(
+        Animated.sequence([
+          Animated.timing(opacity, { toValue: 0.7, duration: 800, useNativeDriver: true }),
+          Animated.timing(opacity, { toValue: 0.3, duration: 800, useNativeDriver: true }),
+        ])
+      ).start();
+    }, delay);
+    return () => clearTimeout(timeout);
+  }, []);
+
+  return (
+    <Animated.View style={[styles.cardContainer, { opacity }]}>
+      <View style={[styles.cardAccentLine, { backgroundColor: '#2A2D35' }]} />
+      <View style={styles.cardContent}>
+        <View style={styles.cardHeader}>
+          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+            <View style={{ width: 22, height: 22, borderRadius: 4, backgroundColor: '#2A2D35' }} />
+            <View style={{ width: 120, height: 18, borderRadius: 4, backgroundColor: '#2A2D35', marginLeft: 8 }} />
+          </View>
+          <View style={{ width: 60, height: 20, borderRadius: 8, backgroundColor: '#2A2D35' }} />
+        </View>
+        <View style={{ width: 180, height: 10, borderRadius: 4, backgroundColor: '#2A2D35', marginBottom: 16 }} />
+        <View style={[styles.gridContainer, { backgroundColor: '#13151A' }]}>
+          <View style={{ flex: 1 }}>
+            <View style={{ width: 40, height: 8, borderRadius: 3, backgroundColor: '#2A2D35', marginBottom: 6 }} />
+            <View style={{ width: 60, height: 14, borderRadius: 3, backgroundColor: '#2A2D35' }} />
+          </View>
+          <View style={styles.gridDivider} />
+          <View style={{ flex: 1 }}>
+            <View style={{ width: 50, height: 8, borderRadius: 3, backgroundColor: '#2A2D35', marginBottom: 6 }} />
+            <View style={{ width: 50, height: 14, borderRadius: 3, backgroundColor: '#2A2D35' }} />
+          </View>
+          <View style={styles.gridDivider} />
+          <View style={{ flex: 1, alignItems: 'flex-end' }}>
+            <View style={{ width: 40, height: 8, borderRadius: 3, backgroundColor: '#2A2D35', marginBottom: 6 }} />
+            <View style={{ width: 55, height: 14, borderRadius: 3, backgroundColor: '#2A2D35' }} />
+          </View>
+        </View>
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 8 }}>
+          <View style={{ width: 100, height: 12, borderRadius: 3, backgroundColor: '#2A2D35' }} />
+          <View style={{ width: 60, height: 12, borderRadius: 3, backgroundColor: '#2A2D35' }} />
+        </View>
+      </View>
+    </Animated.View>
+  );
+}
+
+// ─── Animated Card Wrapper ───────────────────────────────────────────────────
+function AnimatedCard({ children, index }: { children: React.ReactNode; index: number }) {
+  const opacity = useRef(new Animated.Value(0)).current;
+  const translateY = useRef(new Animated.Value(20)).current;
+
+  useEffect(() => {
+    Animated.parallel([
+      Animated.timing(opacity, {
+        toValue: 1,
+        duration: 400,
+        delay: index * 100, // staggered
+        useNativeDriver: true,
+      }),
+      Animated.timing(translateY, {
+        toValue: 0,
+        duration: 400,
+        delay: index * 100,
+        useNativeDriver: true,
+      })
+    ]).start();
+  }, []);
+
+  return (
+    <Animated.View style={{ opacity, transform: [{ translateY }] }}>
+      {children}
+    </Animated.View>
+  );
+}
 
 export default function SignalFeedScreen() {
   const { signals, setSignals, connect, disconnect } = useSignalStore();
   const { user } = useAuthStore();
   const [refreshing, setRefreshing] = useState(false);
+  const [isInitialLoad, setIsInitialLoad] = useState(true);
   const [activeFilter, setActiveFilter] = useState('All');
   const router = useRouter();
   
@@ -57,10 +141,13 @@ export default function SignalFeedScreen() {
       setSignals(response.data);
     } catch (error) {
       console.error('Failed to fetch signals', error);
+    } finally {
+      setIsInitialLoad(false);
     }
   };
 
   const onRefresh = async () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     setRefreshing(true);
     await fetchSignals();
     setRefreshing(false);
@@ -111,72 +198,127 @@ export default function SignalFeedScreen() {
     return `${Math.floor(hours / 24)}d ago`;
   };
 
-  const renderSignal = ({ item }: { item: Signal }) => {
-    const isLong = item.direction === 'LONG';
-    const mainColor = isLong ? '#16C784' : '#EA3943';
-    
-    let statusText = 'ACTIVE';
-    let statusColor = '#3B82F6';
+  const getOutcomeBadge = (outcome: string | undefined | null) => {
+    if (!outcome) return null;
 
-    if (item.outcome === 'WIN') {
-      statusText = 'TARGET HIT';
-      statusColor = '#16C784';
-    } else if (item.outcome === 'LOSS') {
-      statusText = 'STOPPED OUT';
-      statusColor = '#EA3943';
+    const isWin = ['TP1', 'TP2', 'TP3'].includes(outcome);
+    const isSL = outcome === 'SL';
+    const isExpired = outcome === 'EXPIRED';
+
+    let label = '';
+    let bgColor = '';
+    let textColor = '';
+    let icon: any = '';
+
+    if (isWin) {
+      label = `${outcome} HIT`;
+      bgColor = 'rgba(22, 199, 132, 0.15)';
+      textColor = '#16C784';
+      icon = 'check-circle';
+    } else if (isSL) {
+      label = 'STOPPED OUT';
+      bgColor = 'rgba(234, 57, 67, 0.15)';
+      textColor = '#EA3943';
+      icon = 'close-circle';
+    } else if (isExpired) {
+      label = 'EXPIRED';
+      bgColor = 'rgba(156, 163, 175, 0.15)';
+      textColor = '#9CA3AF';
+      icon = 'clock-outline';
     }
 
+    return { label, bgColor, textColor, icon };
+  };
+
+  const handleFilterTap = (filter: string) => {
+    Haptics.selectionAsync();
+    setActiveFilter(filter);
+  };
+
+  const renderSignal = ({ item, index }: { item: Signal; index: number }) => {
+    const isLong = item.direction === 'LONG';
+    const mainColor = isLong ? '#16C784' : '#EA3943';
+    const outcomeBadge = getOutcomeBadge(item.outcome);
+    const isClosed = !!item.outcome;
+
     return (
-      <TouchableOpacity 
-        activeOpacity={0.8}
-        onPress={() => router.push(`/signal/${item.id}`)}
-        style={styles.cardContainer}
-      >
-        {/* Top Accent Line */}
-        <View style={[styles.cardAccentLine, { backgroundColor: mainColor }]} />
+      <AnimatedCard index={index}>
+        <TouchableOpacity 
+          activeOpacity={0.8}
+          onPress={() => {
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+            router.push(`/signal/${item.id}`);
+          }}
+          style={[styles.cardContainer, isClosed && styles.cardContainerClosed]}
+        >
+          {/* Top Accent Line */}
+          <View style={[styles.cardAccentLine, { backgroundColor: isClosed ? (outcomeBadge?.textColor || '#6B7280') : mainColor }]} />
 
-        <View style={styles.cardContent}>
-          {/* Header */}
-          <View style={styles.cardHeader}>
-            <View style={styles.symbolContainer}>
-              <MaterialCommunityIcons name={isLong ? "trending-up" : "trending-down"} size={22} color={mainColor} />
-              <Text style={styles.symbolText}>{item.symbol}</Text>
+          <View style={styles.cardContent}>
+            {/* Header */}
+            <View style={styles.cardHeader}>
+              <View style={styles.symbolContainer}>
+                <MaterialCommunityIcons name={isLong ? "trending-up" : "trending-down"} size={22} color={isClosed ? '#6B7280' : mainColor} />
+                <Text style={[styles.symbolText, isClosed && { color: '#9CA3AF' }]}>{item.symbol}</Text>
+              </View>
+              <View style={styles.timeBadge}>
+                <MaterialCommunityIcons name="clock-outline" size={12} color="#9CA3AF" />
+                <Text style={styles.timeText}>{getTimeAgo(item.created_at)}</Text>
+              </View>
             </View>
-            <View style={styles.timeBadge}>
-              <MaterialCommunityIcons name="clock-outline" size={12} color="#9CA3AF" />
-              <Text style={styles.timeText}>{getTimeAgo(item.created_at)}</Text>
+
+            {/* Meta Information */}
+            <Text style={styles.metaText}>
+              {item.exchange} • {item.market_type} • {item.timeframe} {item.style}
+            </Text>
+
+            {/* Outcome Badge (if closed) */}
+            {outcomeBadge && (
+              <View style={[styles.outcomeBadge, { backgroundColor: outcomeBadge.bgColor }]}>
+                <MaterialCommunityIcons name={outcomeBadge.icon} size={16} color={outcomeBadge.textColor} />
+                <Text style={[styles.outcomeBadgeText, { color: outcomeBadge.textColor }]}>{outcomeBadge.label}</Text>
+                {item.profit_pct !== undefined && item.profit_pct !== null && (
+                  <Text style={[styles.outcomeProfitText, { color: outcomeBadge.textColor }]}>
+                    {item.profit_pct >= 0 ? '+' : ''}{typeof item.profit_pct === 'number' ? item.profit_pct.toFixed(2) : item.profit_pct}%
+                  </Text>
+                )}
+              </View>
+            )}
+
+            {/* Data Grid */}
+            <View style={styles.gridContainer}>
+              <View style={styles.gridItem}>
+                <Text style={styles.gridLabel}>ENTRY</Text>
+                <Text style={styles.gridValue}>${item.entry_low}</Text>
+              </View>
+              <View style={styles.gridDivider} />
+              <View style={styles.gridItem}>
+                <Text style={styles.gridLabel}>TARGET 1</Text>
+                <Text style={[styles.gridValue, { color: '#16C784' }]}>
+                  +{item.tp1_pct ? item.tp1_pct.toFixed(2) : '0.00'}%
+                </Text>
+              </View>
+              <View style={styles.gridDivider} />
+              <View style={[styles.gridItem, { alignItems: 'flex-end' }]}>
+                <Text style={styles.gridLabel}>STATUS</Text>
+                {isClosed ? (
+                  <Text style={[styles.gridValue, { color: outcomeBadge?.textColor || '#9CA3AF', fontSize: 12 }]}>
+                    CLOSED
+                  </Text>
+                ) : (
+                  <View style={styles.activeStatusContainer}>
+                    <View style={styles.activeStatusDot} />
+                    <Text style={[styles.gridValue, { color: '#3B82F6', fontSize: 12 }]}>ACTIVE</Text>
+                  </View>
+                )}
+              </View>
             </View>
+
+            {/* Confidence Bar */}
+            <ConfidenceBar confidence={item.confidence} rrRatio={`1:${item.rr_ratio}`} />
           </View>
-
-          {/* Meta Information */}
-          <Text style={styles.metaText}>
-            {item.exchange} • {item.market_type} • {item.timeframe} {item.style}
-          </Text>
-
-          {/* Data Grid */}
-          <View style={styles.gridContainer}>
-            <View style={styles.gridItem}>
-              <Text style={styles.gridLabel}>ENTRY</Text>
-              <Text style={styles.gridValue}>${item.entry_low}</Text>
-            </View>
-            <View style={styles.gridDivider} />
-            <View style={styles.gridItem}>
-              <Text style={styles.gridLabel}>TARGET 1</Text>
-              <Text style={[styles.gridValue, { color: '#16C784' }]}>
-                +{item.tp1_pct ? item.tp1_pct.toFixed(2) : '0.00'}%
-              </Text>
-            </View>
-            <View style={styles.gridDivider} />
-            <View style={[styles.gridItem, { alignItems: 'flex-end' }]}>
-              <Text style={styles.gridLabel}>STATUS</Text>
-              <Text style={[styles.gridValue, { color: statusColor, fontSize: 12 }]}>{statusText}</Text>
-            </View>
-          </View>
-
-          {/* Confidence Bar */}
-          <ConfidenceBar confidence={item.confidence} rrRatio={`1:${item.rr_ratio}`} />
-        </View>
-      </TouchableOpacity>
+        </TouchableOpacity>
+      </AnimatedCard>
     );
   };
 
@@ -207,7 +349,7 @@ export default function SignalFeedScreen() {
             return (
               <TouchableOpacity
                 key={filter}
-                onPress={() => setActiveFilter(filter)}
+                onPress={() => handleFilterTap(filter)}
                 style={[
                   styles.filterPill,
                   isActive ? styles.filterPillActive : styles.filterPillInactive
@@ -226,27 +368,35 @@ export default function SignalFeedScreen() {
       </View>
 
       {/* Feed */}
-      <FlatList
-        data={filteredSignals}
-        keyExtractor={(item) => item.id.toString()}
-        renderItem={renderSignal}
-        contentContainerStyle={styles.listContent}
-        showsVerticalScrollIndicator={false}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#16C784" />
-        }
-        ListEmptyComponent={
-          <View style={styles.emptyContainer}>
-            <View style={styles.emptyIconContainer}>
-              <MaterialCommunityIcons name="satellite-variant" size={48} color="#16C784" />
+      {isInitialLoad ? (
+        <ScrollView style={{ paddingHorizontal: 24 }} showsVerticalScrollIndicator={false}>
+          <SkeletonCard delay={0} />
+          <SkeletonCard delay={150} />
+          <SkeletonCard delay={300} />
+        </ScrollView>
+      ) : (
+        <FlatList
+          data={filteredSignals}
+          keyExtractor={(item) => item.id.toString()}
+          renderItem={renderSignal}
+          contentContainerStyle={styles.listContent}
+          showsVerticalScrollIndicator={false}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#16C784" />
+          }
+          ListEmptyComponent={
+            <View style={styles.emptyContainer}>
+              <View style={styles.emptyIconContainer}>
+                <MaterialCommunityIcons name="satellite-variant" size={48} color="#16C784" />
+              </View>
+              <Text style={styles.emptyTitle}>Scanning Markets</Text>
+              <Text style={styles.emptySubtitle}>
+                Our AI is currently analyzing charts.{'\n'}Signals will appear here automatically.
+              </Text>
             </View>
-            <Text style={styles.emptyTitle}>Scanning Markets</Text>
-            <Text style={styles.emptySubtitle}>
-              Our AI is currently analyzing charts.{'\n'}Signals will appear here automatically.
-            </Text>
-          </View>
-        }
-      />
+          }
+        />
+      )}
     </View>
   );
 }
@@ -360,6 +510,9 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.03)',
   },
+  cardContainerClosed: {
+    opacity: 0.75,
+  },
   cardAccentLine: {
     height: 4,
     width: '100%',
@@ -404,7 +557,37 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     letterSpacing: 1,
     textTransform: 'uppercase',
-    marginBottom: 16,
+    marginBottom: 12,
+  },
+  outcomeBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 10,
+    marginBottom: 12,
+  },
+  outcomeBadgeText: {
+    fontSize: 12,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+    marginLeft: 6,
+  },
+  outcomeProfitText: {
+    fontSize: 13,
+    fontWeight: '800',
+    marginLeft: 'auto',
+  },
+  activeStatusContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  activeStatusDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#3B82F6',
+    marginRight: 4,
   },
   gridContainer: {
     flexDirection: 'row',
@@ -450,6 +633,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(22, 199, 132, 0.2)',
   },
   emptyTitle: {
     color: '#FFF',
@@ -458,9 +643,10 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   emptySubtitle: {
-    color: '#9CA3AF',
+    color: '#6B7280',
     fontSize: 14,
     textAlign: 'center',
     lineHeight: 22,
+    fontWeight: '500',
   },
 });

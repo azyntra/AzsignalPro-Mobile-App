@@ -32,6 +32,8 @@ export interface Signal {
   created_at: string;
   outcome?: string;
   profit_pct?: number;
+  price_at_close?: number;
+  closed_at?: string;
 }
 
 interface SignalState {

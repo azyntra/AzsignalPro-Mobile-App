@@ -280,8 +280,146 @@ async function runSwingScan() {
   console.log('═══ SWING SCAN COMPLETE ═══');
 }
 
+/**
+ * Outcome Tracker — runs every 60 seconds.
+ * For each open signal (no outcome), fetches the current price and checks
+ * whether TP1, TP2, TP3, or Stop Loss has been hit. Updates the DB and
+ * broadcasts signal.update over WebSocket.
+ */
+async function runOutcomeTracker() {
+  try {
+    const openSignals = await prisma.signal.findMany({
+      where: { outcome: null },
+      orderBy: { created_at: 'desc' },
+    });
+
+    if (openSignals.length === 0) return;
+
+    // Group signals by exchange+symbol to minimize API calls
+    const groups = {};
+    for (const sig of openSignals) {
+      const key = `${sig.exchange}|${sig.symbol}`;
+      if (!groups[key]) groups[key] = [];
+      groups[key].push(sig);
+    }
+
+    const exMap = await getExchanges();
+
+    for (const [key, signals] of Object.entries(groups)) {
+      const [exchangeName, symbol] = key.split('|');
+      const exchange = exMap[exchangeName];
+      if (!exchange) continue;
+
+      let currentPrice = null;
+      try {
+        if (!exchange.markets || Object.keys(exchange.markets).length === 0) {
+          await exchange.loadMarkets();
+        }
+        const ticker = await exchange.fetchTicker(symbol);
+        currentPrice = ticker.last;
+      } catch (e) {
+        // If we can't fetch the price, skip this group
+        continue;
+      }
+
+      if (!currentPrice) continue;
+
+      for (const sig of signals) {
+        // Check expiry first
+        const ageMs = Date.now() - new Date(sig.created_at).getTime();
+        const ageHours = ageMs / (1000 * 60 * 60);
+        const isScalp = sig.style === 'scalp';
+        const maxAge = isScalp ? 1 : 72; // 1 hour for scalp, 72 hours for swing
+
+        if (ageHours > maxAge) {
+          // Auto-expire
+          await updateSignalOutcome(sig, 'EXPIRED', currentPrice, 0);
+          continue;
+        }
+
+        // Check TP/SL hits
+        let outcome = null;
+        let profitPct = 0;
+
+        if (sig.direction === 'LONG') {
+          if (currentPrice <= sig.stop_loss) {
+            outcome = 'SL';
+            profitPct = -sig.risk_pct;
+          } else if (currentPrice >= sig.tp3) {
+            outcome = 'TP3';
+            profitPct = sig.tp3_pct;
+          } else if (currentPrice >= sig.tp2) {
+            outcome = 'TP2';
+            profitPct = sig.tp2_pct;
+          } else if (currentPrice >= sig.tp1) {
+            outcome = 'TP1';
+            profitPct = sig.tp1_pct;
+          }
+        } else {
+          // SHORT
+          if (currentPrice >= sig.stop_loss) {
+            outcome = 'SL';
+            profitPct = -sig.risk_pct;
+          } else if (currentPrice <= sig.tp3) {
+            outcome = 'TP3';
+            profitPct = sig.tp3_pct;
+          } else if (currentPrice <= sig.tp2) {
+            outcome = 'TP2';
+            profitPct = sig.tp2_pct;
+          } else if (currentPrice <= sig.tp1) {
+            outcome = 'TP1';
+            profitPct = sig.tp1_pct;
+          }
+        }
+
+        if (outcome) {
+          await updateSignalOutcome(sig, outcome, currentPrice, profitPct);
+        }
+      }
+
+      // Small delay between exchange+symbol fetches to avoid rate limits
+      await new Promise(r => setTimeout(r, 150));
+    }
+  } catch (error) {
+    console.error('Outcome tracker error:', error.message);
+  }
+}
+
+async function updateSignalOutcome(signal, outcome, closePrice, profitPct) {
+  try {
+    const updated = await prisma.signal.update({
+      where: { id: signal.id },
+      data: {
+        outcome,
+        price_at_close: closePrice,
+        profit_pct: parseFloat(profitPct.toFixed(2)),
+        closed_at: new Date(),
+      },
+    });
+
+    const isWin = ['TP1', 'TP2', 'TP3'].includes(outcome);
+    const emoji = isWin ? '🎯' : outcome === 'SL' ? '❌' : '⏰';
+    console.log(`${emoji} [OUTCOME] ${signal.symbol} ${signal.direction} → ${outcome} (${profitPct >= 0 ? '+' : ''}${profitPct.toFixed(2)}%)`);
+
+    // Broadcast to mobile app via WebSocket
+    broadcastSignal({ ...updated, _type: 'update' });
+
+    // Also broadcast with explicit signal.update type for stores that listen for it
+    const payload = JSON.stringify({ type: 'signal.update', data: updated });
+    for (const client of wsClients) {
+      if (client.readyState === 1) {
+        client.send(payload);
+      }
+    }
+  } catch (error) {
+    console.error(`Failed to update outcome for signal ${signal.id}:`, error.message);
+  }
+}
+
 module.exports = {
   runScalpScan,
   runSwingScan,
+  runOutcomeTracker,
   registerWebSocket,
 };
+
