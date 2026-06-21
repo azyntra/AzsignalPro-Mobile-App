@@ -238,7 +238,21 @@ export default function StatsScreen() {
       if (!isRefresh) setLoading(true);
       setError(null);
       const res = await api.get(`/stats?range=${range}`);
-      setStats(res.data);
+      // Safe defaults for backward compat with old API responses
+      setStats({
+        totalSignals: res.data.totalSignals ?? 0,
+        closedSignals: res.data.closedSignals ?? 0,
+        wins: res.data.wins ?? 0,
+        losses: res.data.losses ?? 0,
+        winRate: res.data.winRate ?? '0.0',
+        avgProfit: res.data.avgProfit ?? '0.0',
+        cumulativePnl: res.data.cumulativePnl ?? '0.0',
+        dailyBreakdown: res.data.dailyBreakdown ?? [],
+        byExchange: res.data.byExchange ?? [],
+        bestPair: res.data.bestPair ?? null,
+        streak: res.data.streak ?? { count: 0, type: null },
+        recentTrades: res.data.recentTrades ?? [],
+      });
     } catch (err: any) {
       setError(err.message || 'Failed to load stats');
     } finally {
