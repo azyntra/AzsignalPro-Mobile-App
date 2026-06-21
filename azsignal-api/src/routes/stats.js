@@ -5,6 +5,14 @@ const { authenticateToken } = require('../middleware/auth');
 const router = express.Router();
 const prisma = new PrismaClient();
 
+// Outcome values stored by webhook: 'TP1', 'TP2', 'TP3', 'SL', 'EXPIRED'
+const WIN_OUTCOMES = ['TP1', 'TP2', 'TP3'];
+const LOSS_OUTCOMES = ['SL'];
+const CLOSED_OUTCOMES = ['TP1', 'TP2', 'TP3', 'SL'];
+
+function isWin(outcome) { return WIN_OUTCOMES.includes(outcome); }
+function isLoss(outcome) { return LOSS_OUTCOMES.includes(outcome); }
+
 /**
  * GET /api/stats?range=7D|30D|90D|All
  * Returns comprehensive performance stats filtered by time range.
@@ -26,7 +34,7 @@ router.get('/', authenticateToken, async (req, res) => {
     // 'All' => no date filter
 
     const whereClause = {
-      outcome: { not: null, in: ['WIN', 'LOSS'] },
+      outcome: { not: null, in: CLOSED_OUTCOMES },
       ...(dateFilter ? { created_at: { gte: dateFilter } } : {}),
     };
 
@@ -40,16 +48,16 @@ router.get('/', authenticateToken, async (req, res) => {
     });
 
     const total = signals.length;
-    const wins = signals.filter(s => s.outcome === 'WIN');
-    const losses = signals.filter(s => s.outcome === 'LOSS');
+    const wins = signals.filter(s => isWin(s.outcome));
+    const losses = signals.filter(s => isLoss(s.outcome));
 
     const winRate = total > 0 ? (wins.length / total) * 100 : 0;
 
     // Cumulative PnL calc
     let cumulativePnl = 0;
     signals.forEach(s => {
-      if (s.outcome === 'WIN') cumulativePnl += (s.risk_pct || 1) * (s.rr_ratio || 2);
-      if (s.outcome === 'LOSS') cumulativePnl -= (s.risk_pct || 1);
+      if (isWin(s.outcome)) cumulativePnl += (s.risk_pct || 1) * (s.rr_ratio || 2);
+      if (isLoss(s.outcome)) cumulativePnl -= (s.risk_pct || 1);
     });
 
     const avgProfit = wins.length > 0 ? cumulativePnl / wins.length : 0;
@@ -72,8 +80,8 @@ router.get('/', authenticateToken, async (req, res) => {
       dailyBreakdown.push({
         day: dayNames[dayStart.getDay()],
         date: dayStart.toISOString().split('T')[0],
-        wins: daySignals.filter(s => s.outcome === 'WIN').length,
-        losses: daySignals.filter(s => s.outcome === 'LOSS').length,
+        wins: daySignals.filter(s => isWin(s.outcome)).length,
+        losses: daySignals.filter(s => isLoss(s.outcome)).length,
       });
     }
 
@@ -83,8 +91,8 @@ router.get('/', authenticateToken, async (req, res) => {
       const ex = (s.exchange || 'Unknown').toLowerCase();
       if (!exchangeMap[ex]) exchangeMap[ex] = { wins: 0, losses: 0, total: 0 };
       exchangeMap[ex].total++;
-      if (s.outcome === 'WIN') exchangeMap[ex].wins++;
-      if (s.outcome === 'LOSS') exchangeMap[ex].losses++;
+      if (isWin(s.outcome)) exchangeMap[ex].wins++;
+      if (isLoss(s.outcome)) exchangeMap[ex].losses++;
     });
 
     const byExchange = Object.entries(exchangeMap)
@@ -103,7 +111,7 @@ router.get('/', authenticateToken, async (req, res) => {
       const sym = s.symbol || 'Unknown';
       if (!pairMap[sym]) pairMap[sym] = { wins: 0, total: 0 };
       pairMap[sym].total++;
-      if (s.outcome === 'WIN') pairMap[sym].wins++;
+      if (isWin(s.outcome)) pairMap[sym].wins++;
     });
 
     let bestPair = null;
@@ -123,14 +131,15 @@ router.get('/', authenticateToken, async (req, res) => {
       }
     });
 
-    // --- Win/Loss streak ---
+    // --- Win/Loss streak (normalize to WIN/LOSS for frontend) ---
     let currentStreak = 0;
     let streakType = null;
     for (const s of signals) {
+      const normalized = isWin(s.outcome) ? 'WIN' : 'LOSS';
       if (streakType === null) {
-        streakType = s.outcome;
+        streakType = normalized;
         currentStreak = 1;
-      } else if (s.outcome === streakType) {
+      } else if (normalized === streakType) {
         currentStreak++;
       } else {
         break;
@@ -143,9 +152,9 @@ router.get('/', authenticateToken, async (req, res) => {
       symbol: s.symbol,
       direction: s.direction,
       exchange: s.exchange,
-      outcome: s.outcome,
-      profitPct: s.profit_pct ?? (s.outcome === 'WIN' 
-        ? ((s.risk_pct || 1) * (s.rr_ratio || 2)).toFixed(2) 
+      outcome: isWin(s.outcome) ? 'WIN' : 'LOSS',
+      profitPct: s.profit_pct ?? (isWin(s.outcome)
+        ? ((s.risk_pct || 1) * (s.rr_ratio || 2)).toFixed(2)
         : (-1 * (s.risk_pct || 1)).toFixed(2)),
       closedAt: s.closed_at || s.created_at,
     }));
